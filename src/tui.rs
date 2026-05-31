@@ -14,7 +14,7 @@ use ratatui::{
 use std::io;
 use std::time::Duration;
 
-use crate::db::{HistoryEntry, query_frequent, query_recent};
+use crate::db::{HistoryEntry, query_collapsed};
 
 /// Action the user took in the TUI.
 #[derive(Debug, Clone)]
@@ -38,7 +38,6 @@ pub struct App {
     pub cwd: String,
     pub entries: Vec<HistoryEntry>,
     pub limit: usize,
-    pub dedup: bool,
     pub action: Option<Action>,
     pub quit: bool,
     pub num_mode: bool,
@@ -54,7 +53,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(cwd: String, limit: usize, dedup: bool) -> Self {
+    pub fn new(cwd: String, limit: usize) -> Self {
         Self {
             frequent_mode: false,
             keyword: String::new(),
@@ -64,7 +63,6 @@ impl App {
             cwd,
             entries: Vec::new(),
             limit,
-            dedup,
             action: None,
             quit: false,
             num_mode: false,
@@ -84,29 +82,13 @@ impl App {
         if let Ok(count) = conn.query_row("SELECT COUNT(*) FROM commands", [], |r| r.get::<_, usize>(0)) {
             self.total_count = count;
         }
-        // Query extra rows to account for dedup collapsing consecutive duplicates
-        let query_limit = if !self.frequent_mode && self.dedup {
-            usize::MAX
-        } else {
-            self.limit
-        };
 
-        let result = if self.frequent_mode {
-            query_frequent(conn, &self.keyword, &self.cwd, query_limit)
-        } else {
-            query_recent(conn, &self.keyword, &self.cwd, query_limit)
-        };
+        let query_limit = if self.keyword.is_empty() { self.limit } else { self.limit * 5 };
+
+        let result = query_collapsed(conn, &self.keyword, &self.cwd, query_limit, self.frequent_mode);
 
         match result {
             Ok(entries) => {
-                // Deduplicate consecutive duplicates in recent mode
-                let entries = if !self.frequent_mode && self.dedup {
-                    let entries = dedup_consecutive(entries);
-                    // Truncate to limit
-                    entries.into_iter().take(self.limit).collect()
-                } else {
-                    entries
-                };
                 self.entries = entries;
                 // Clamp selected index
                 if self.entries.is_empty() {
@@ -185,7 +167,6 @@ pub fn run(
     conn: &rusqlite::Connection,
     cwd: &str,
     limit: usize,
-    dedup: bool,
 ) -> io::Result<Action> {
     enable_raw_mode()?;
     execute!(io::stdout(), EnterAlternateScreen, SetCursorStyle::BlinkingBar)?;
@@ -196,7 +177,7 @@ pub fn run(
     let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(cwd.to_string(), limit, dedup);
+    let mut app = App::new(cwd.to_string(), limit);
     app.load_entries(conn);
 
     let result = run_loop(&mut terminal, &mut app, conn);
@@ -512,8 +493,11 @@ fn render_list(f: &mut Frame, area: Rect, app: &mut App) {
             let is_selected = i == app.selected;
             let num = format!(" {:2}.", i + 1);
             let cmd_text = first_line(&entry.command);
-            let cwd_display = shorten_cwd(entry.cwd.as_deref().unwrap_or(""));
-            let time_display = relative_time(&entry.created_at);
+            let cwd_display = entry.cwd.as_deref()
+                .filter(|c| *c != app.cwd)
+                .map(|c| shorten_cwd(c))
+                .unwrap_or_default();
+            let time_display = entry.created_at.as_deref().map(|t| relative_time(t)).unwrap_or_default();
 
             let freq_badge = if entry.freq > 1 {
                 format!(" (x{})", entry.freq)
@@ -731,18 +715,4 @@ fn relative_time(iso: &str) -> String {
     } else {
         format!("{}周前", secs / 604800)
     }
-}
-
-/// Deduplicate consecutive entries with the same (command, cwd) pair.
-fn dedup_consecutive(entries: Vec<HistoryEntry>) -> Vec<HistoryEntry> {
-    let mut result: Vec<HistoryEntry> = Vec::new();
-    for entry in entries {
-        if let Some(last) = result.last() {
-            if last.command == entry.command && last.cwd == entry.cwd {
-                continue;
-            }
-        }
-        result.push(entry);
-    }
-    result
 }

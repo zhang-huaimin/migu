@@ -66,6 +66,11 @@ fn run_import(shell: &str) {
         }
     };
 
+    // Skip if already imported
+    if db::is_imported(&conn, shell) {
+        return;
+    }
+
     let host = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
     let file = match std::fs::File::open(&history_file) {
         Ok(f) => f,
@@ -77,6 +82,7 @@ fn run_import(shell: &str) {
 
     let reader = std::io::BufReader::new(file);
     let mut count = 0u64;
+    let mut pending_ts: Option<i64> = None;
 
     // Use a transaction for bulk import performance
     if let Err(e) = conn.execute("BEGIN", []) {
@@ -94,15 +100,18 @@ fn run_import(shell: &str) {
             continue;
         }
 
-        let cmd = match shell {
-            "bash" => parse_bash_line(&line),
+        let result = match shell {
+            "bash" => parse_bash_line(&line, &mut pending_ts),
             "zsh" => parse_zsh_line(&line),
             "fish" => parse_fish_line(&line),
             _ => None,
         };
 
-        if let Some(cmd) = cmd {
-            if let Err(e) = db::insert_command(&conn, &cmd, &host, shell, None, None, None) {
+        if let Some((cmd, ts)) = result {
+            let created_at = ts.map(unix_to_iso8601);
+            if let Err(e) = db::insert_imported_command(
+                &conn, &cmd, &host, shell, created_at.as_deref(),
+            ) {
                 eprintln!("migu: failed to insert command: {}", e);
             } else {
                 count += 1;
@@ -115,39 +124,75 @@ fn run_import(shell: &str) {
         process::exit(1);
     }
 
+    if let Err(e) = db::mark_imported(&conn, shell) {
+        eprintln!("migu: failed to mark import: {}", e);
+    }
+
     eprintln!("migu: imported {} commands from {} history", count, shell);
 }
 
+/// Convert a Unix epoch timestamp to ISO 8601 string (UTC).
+fn unix_to_iso8601(epoch: i64) -> String {
+    chrono::DateTime::from_timestamp(epoch, 0)
+        .map(|dt| dt.format("%Y-%m-%dT%H:%M:%S").to_string())
+        .unwrap_or_else(|| "1970-01-01T00:00:00".to_string())
+}
+
 /// Parse a line from bash history.
-/// Lines starting with "#" followed by digits are HISTTIMEFORMAT timestamps.
-fn parse_bash_line(line: &str) -> Option<String> {
-    // Skip timestamp lines: "#1234567890"
+/// Lines starting with "#" followed by digits are HISTTIMEFORMAT timestamps
+/// stored in pending_ts for the next command line.
+/// Returns (command, optional_unix_timestamp).
+fn parse_bash_line(line: &str, pending_ts: &mut Option<i64>) -> Option<(String, Option<i64>)> {
     if line.starts_with('#') && line[1..].chars().all(|c| c.is_ascii_digit()) {
+        if let Ok(ts) = line[1..].parse::<i64>() {
+            *pending_ts = Some(ts);
+        }
         return None;
     }
-    Some(line.to_string())
+    let ts = pending_ts.take();
+    Some((line.to_string(), ts))
 }
 
 /// Parse a line from zsh history.
 /// Format: ": 1234567890:0;command"
-fn parse_zsh_line(line: &str) -> Option<String> {
-    // Zsh extended history format: ": <timestamp>:<duration>;<command>"
+/// Returns (command, optional_unix_timestamp).
+fn parse_zsh_line(line: &str) -> Option<(String, Option<i64>)> {
     if line.starts_with(':') {
-        if let Some(pos) = line.rfind(';') {
-            return Some(line[pos + 1..].to_string());
+        if let Some(rest) = line.strip_prefix(':') {
+            let rest = rest.trim_start();
+            if let Some(colon_pos) = rest.find(':') {
+                let ts = rest[..colon_pos].parse::<i64>().ok();
+                let after_colon = &rest[colon_pos + 1..];
+                if let Some(semi_pos) = after_colon.find(';') {
+                    return Some((after_colon[semi_pos + 1..].to_string(), ts));
+                }
+            }
         }
     }
-    Some(line.to_string())
+    Some((line.to_string(), None))
 }
 
 /// Parse a line from fish history.
 /// Fish uses YAML-like blocks: "- cmd: <command>" are the command lines.
-/// Non-command lines ("  when: ...", etc.) are skipped.
-fn parse_fish_line(line: &str) -> Option<String> {
+/// Returns (command, optional_unix_timestamp).
+fn parse_fish_line(line: &str) -> Option<(String, Option<i64>)> {
     if let Some(cmd) = line.strip_prefix("- cmd: ") {
-        return Some(cmd.to_string());
+        return Some((cmd.to_string(), None));
     }
     None
+}
+
+/// Detect the current shell from the SHELL environment variable.
+fn detect_shell() -> String {
+    std::env::var("SHELL")
+        .ok()
+        .and_then(|s| {
+            std::path::Path::new(&s)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.to_string())
+        })
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 /// Handle the `re add` subcommand.
@@ -211,9 +256,7 @@ fn run_tui(cli: &Cli) {
         .and_then(|p| p.to_str().map(|s| s.to_string()))
         .unwrap_or_default();
 
-    let dedup = !cli.no_dedup;
-
-    match tui::run(&conn, &cwd, cli.limit as usize, dedup) {
+    match tui::run(&conn, &cwd, cli.limit as usize) {
         Ok(Action::Insert(cmd)) => {
             if std::env::var("MIGU_WIDGET").is_ok() {
                 // Widget mode: write to temp file
@@ -224,6 +267,17 @@ fn run_tui(cli: &Cli) {
             }
         }
         Ok(Action::Execute(cmd)) => {
+            // Echo the command so the user sees what was executed
+            eprintln!("\x1b[1;36m$\x1b[0m {}", cmd);
+
+            // Record the executed command in the database
+            let path = db::db_path();
+            if let Ok(conn) = db::open(&path) {
+                let host = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
+                let sh = detect_shell();
+                let _ = db::insert_command(&conn, &cmd, &host, &sh, Some(&cwd), None, None);
+            }
+
             // Restore terminal already done in tui::run
             let status = Command::new("sh")
                 .arg("-c")

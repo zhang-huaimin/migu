@@ -1,11 +1,18 @@
 use rusqlite::{Connection, params};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Get the database path: ~/.local/share/migu/history.db
+/// Get the database path: ~/.migu/history.db
 pub fn db_path() -> PathBuf {
-    let base = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
-    let dir = base.join("migu");
+    let base = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let dir = base.join(".migu");
     std::fs::create_dir_all(&dir).ok();
+    // Set directory permissions to 700 (owner only)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
     dir.join("history.db")
 }
 
@@ -13,6 +20,12 @@ pub fn db_path() -> PathBuf {
 pub fn open(path: &PathBuf) -> rusqlite::Result<Connection> {
     let conn = Connection::open(path)?;
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+    // Set file permissions to 600 (owner read/write only)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
     init_schema(&conn)?;
     Ok(conn)
 }
@@ -27,13 +40,18 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
             shell      TEXT    NOT NULL,
             cwd        TEXT,
             exit_code  INTEGER,
-            created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now')),
+            created_at TEXT    DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now')),
             session_id TEXT
         );
 
         CREATE INDEX IF NOT EXISTS idx_cmd_command    ON commands(command);
         CREATE INDEX IF NOT EXISTS idx_cmd_created_at ON commands(created_at);
-        CREATE INDEX IF NOT EXISTS idx_cmd_cwd        ON commands(cwd);"
+        CREATE INDEX IF NOT EXISTS idx_cmd_cwd        ON commands(cwd);
+
+        CREATE TABLE IF NOT EXISTS meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );"
     )?;
     Ok(())
 }
@@ -56,6 +74,49 @@ pub fn insert_command(
     Ok(())
 }
 
+/// Insert a command imported from shell history, with optional timestamp.
+pub fn insert_imported_command(
+    conn: &Connection,
+    command: &str,
+    hostname: &str,
+    shell: &str,
+    created_at: Option<&str>,
+) -> rusqlite::Result<()> {
+    if let Some(ts) = created_at {
+        conn.execute(
+            "INSERT INTO commands (command, hostname, shell, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![command, hostname, shell, ts],
+        )?;
+    } else {
+        conn.execute(
+            "INSERT INTO commands (command, hostname, shell, created_at)
+             VALUES (?1, ?2, ?3, NULL)",
+            params![command, hostname, shell],
+        )?;
+    }
+    Ok(())
+}
+
+/// Check whether a shell's history has already been imported.
+pub fn is_imported(conn: &Connection, shell: &str) -> bool {
+    conn.query_row(
+        "SELECT value FROM meta WHERE key = ?1",
+        params![format!("imported_{}", shell)],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
+/// Mark a shell's history as imported.
+pub fn mark_imported(conn: &Connection, shell: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, '1')",
+        params![format!("imported_{}", shell)],
+    )?;
+    Ok(())
+}
+
 /// A single history entry returned from queries.
 #[derive(Debug, Clone)]
 pub struct HistoryEntry {
@@ -63,11 +124,12 @@ pub struct HistoryEntry {
     pub id: i64,
     pub command: String,
     pub cwd: Option<String>,
-    pub created_at: String,
+    pub created_at: Option<String>,
     pub freq: i64,
 }
 
 /// Query recent commands, with optional keyword filter and cwd prioritization.
+#[allow(dead_code)]
 pub fn query_recent(
     conn: &Connection,
     keyword: &str,
@@ -81,7 +143,7 @@ pub fn query_recent(
                 COUNT(*) OVER (PARTITION BY command, cwd) AS freq,
                 CASE WHEN cwd = ?1 THEN 0 ELSE 1 END AS priority
          FROM commands
-         ORDER BY priority ASC, created_at DESC
+         ORDER BY priority ASC, created_at IS NULL ASC, created_at DESC
          LIMIT ?2";
 
     let mut stmt = conn.prepare(sql)?;
@@ -102,6 +164,7 @@ pub fn query_recent(
 }
 
 /// Query frequent commands (deduplicated by command + cwd), with optional keyword filter.
+#[allow(dead_code)]
 pub fn query_frequent(
     conn: &Connection,
     keyword: &str,
@@ -118,7 +181,7 @@ pub fn query_frequent(
                 CASE WHEN cwd = ?1 THEN 0 ELSE 1 END AS priority
          FROM commands
          GROUP BY command, cwd
-         ORDER BY priority ASC, freq DESC, created_at DESC
+         ORDER BY priority ASC, freq DESC, created_at IS NULL ASC, created_at DESC
          LIMIT ?2";
 
     let mut stmt = conn.prepare(sql)?;
@@ -128,6 +191,82 @@ pub fn query_frequent(
     for row in rows {
         entries.push(row?);
     }
+
+    if !keyword.is_empty() {
+        entries.retain(|e| fuzzy_match(keyword, &e.command));
+        entries.truncate(limit);
+    }
+
+    Ok(entries)
+}
+
+/// Query commands collapsed across all directories (same command = one entry).
+/// If the command was run in current_cwd, use that cwd's time and frequency.
+/// Otherwise use the first matched cwd's time, and total frequency across all dirs.
+pub fn query_collapsed(
+    conn: &Connection,
+    keyword: &str,
+    current_cwd: &str,
+    limit: usize,
+    by_frequency: bool,
+) -> rusqlite::Result<Vec<HistoryEntry>> {
+    // Fetch all rows grouped by (command, cwd) and aggregate in Rust
+    let sql = "SELECT command, cwd, MAX(created_at) AS created_at, COUNT(*) AS freq
+         FROM commands
+         GROUP BY command, cwd
+         ORDER BY command";
+
+    let mut stmt = conn.prepare(sql)?;
+    let rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, i64>(3)?,
+        ))
+    })?;
+
+    let mut map: HashMap<String, HistoryEntry> = HashMap::new();
+    for row in rows {
+        let (cmd, cwd, created_at, freq) = row?;
+        let entry = map.entry(cmd.clone()).or_insert_with(|| HistoryEntry {
+            id: 0,
+            command: cmd.clone(),
+            cwd: None,
+            created_at: None,
+            freq: 0,
+        });
+        entry.freq += freq;
+        // Prefer current directory's cwd and time if available
+        if cwd.as_deref() == Some(current_cwd) {
+            entry.cwd = cwd;
+            entry.created_at = created_at;
+        } else if entry.cwd.is_none() {
+            // First non-current match: use its cwd and time
+            entry.cwd = cwd;
+            entry.created_at = created_at;
+        }
+    }
+
+    let mut entries: Vec<HistoryEntry> = map.into_values().collect();
+
+    // Sort: current cwd first, then by freq or time depending on mode
+    entries.sort_by(|a, b| {
+        let a_prio = if a.cwd.as_deref() == Some(current_cwd) { 0 } else { 1 };
+        let b_prio = if b.cwd.as_deref() == Some(current_cwd) { 0 } else { 1 };
+        let ord = a_prio.cmp(&b_prio);
+        if ord != std::cmp::Ordering::Equal {
+            return ord;
+        }
+        if by_frequency {
+            b.freq.cmp(&a.freq)
+                .then(b.created_at.cmp(&a.created_at))
+        } else {
+            b.created_at.cmp(&a.created_at)
+        }
+    });
+
+    entries.truncate(limit);
 
     if !keyword.is_empty() {
         entries.retain(|e| fuzzy_match(keyword, &e.command));
