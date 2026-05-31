@@ -22,3 +22,5 @@ shell-words = "1"
 whoami = "1"
 rand = "0.8"
 libc = "0.2"
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }

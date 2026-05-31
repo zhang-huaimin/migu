@@ -14,6 +14,7 @@ use ratatui::{
 use std::io;
 use std::time::Duration;
 
+use crate::config::KeyConfig;
 use crate::db::{HistoryEntry, query_collapsed};
 
 /// Action the user took in the TUI.
@@ -50,10 +51,16 @@ pub struct App {
     pub total_count: usize,
     /// First visible row index (for scroll)
     pub scroll_offset: usize,
+    /// Key bindings from config
+    pub modifier: KeyModifiers,
+    pub key_toggle_sort: char,
+    pub key_toggle_numbers: char,
+    pub key_toggle_help: char,
+    pub key_set_limit: char,
 }
 
 impl App {
-    pub fn new(cwd: String, limit: usize) -> Self {
+    pub fn new(cwd: String, limit: usize, modifier: KeyModifiers, kc: &KeyConfig) -> Self {
         Self {
             frequent_mode: false,
             keyword: String::new(),
@@ -73,6 +80,11 @@ impl App {
             show_help: false,
             total_count: 0,
             scroll_offset: 0,
+            modifier,
+            key_toggle_sort: kc.toggle_sort,
+            key_toggle_numbers: kc.toggle_numbers,
+            key_toggle_help: kc.toggle_help,
+            key_set_limit: kc.set_limit,
         }
     }
 
@@ -167,6 +179,8 @@ pub fn run(
     conn: &rusqlite::Connection,
     cwd: &str,
     limit: usize,
+    modifier: KeyModifiers,
+    kc: &KeyConfig,
 ) -> io::Result<Action> {
     enable_raw_mode()?;
     execute!(io::stdout(), EnterAlternateScreen, SetCursorStyle::BlinkingBar)?;
@@ -177,7 +191,7 @@ pub fn run(
     let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(cwd.to_string(), limit);
+    let mut app = App::new(cwd.to_string(), limit, modifier, kc);
     app.load_entries(conn);
 
     let result = run_loop(&mut terminal, &mut app, conn);
@@ -189,6 +203,10 @@ pub fn run(
 
     result?;
     Ok(app.action.unwrap_or(Action::Quit))
+}
+
+fn is_mod_key(key: &crossterm::event::KeyEvent, modifier: KeyModifiers, ch: char) -> bool {
+    key.modifiers == modifier && key.code == KeyCode::Char(ch)
 }
 
 fn run_loop(
@@ -226,16 +244,9 @@ fn run_loop(
             }
 
             match key.code {
-                // In help mode: Esc closes help, Alt+h toggles, any other key closes
+                // Any key closes help
                 _ if app.show_help => {
-                    match key.code {
-                        KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::ALT) => {
-                            app.show_help = false;
-                        }
-                        _ => {
-                            app.show_help = false;
-                        }
-                    }
+                    app.show_help = false;
                 }
                 KeyCode::Esc => {
                     if app.limit_mode {
@@ -249,20 +260,20 @@ fn run_loop(
                         app.quit = true;
                     }
                 }
-                KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::ALT) => {
+                KeyCode::Char(_) if is_mod_key(&key, app.modifier, app.key_toggle_sort) => {
                     app.toggle_mode();
                     let mode_name = if app.frequent_mode { "频率顺序" } else { "时间顺序" };
                     app.notification = Some(mode_name.to_string());
                     app.notification_timer = 40;
                     app.load_entries(conn);
                 }
-                KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::ALT) => {
+                KeyCode::Char(_) if is_mod_key(&key, app.modifier, app.key_toggle_numbers) => {
                     app.num_mode = !app.num_mode;
                 }
-                KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::ALT) => {
+                KeyCode::Char(_) if is_mod_key(&key, app.modifier, app.key_toggle_help) => {
                     app.show_help = !app.show_help;
                 }
-                KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::ALT) => {
+                KeyCode::Char(_) if is_mod_key(&key, app.modifier, app.key_set_limit) => {
                     app.limit_mode = true;
                     app.limit_input.clear();
                 }
@@ -403,7 +414,7 @@ fn run_loop(
 /// Render the full UI.
 fn ui(f: &mut Frame, app: &mut App) {
     if app.show_help {
-        render_help(f, f.area());
+        render_help(f, f.area(), app);
         return;
     }
 
@@ -565,24 +576,28 @@ fn render_footer(f: &mut Frame, area: Rect, app: &App) {
     let _ = chunks[1];
 }
 
-fn render_help(f: &mut Frame, area: Rect) {
+fn render_help(f: &mut Frame, area: Rect, app: &App) {
     let key_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
     let desc_style = Style::default().fg(Color::White);
 
-    let pairs: Vec<(&str, &str)> = vec![
-        ("按键", "功能"),
-        ("", ""),
-        ("> keyword", "输入关键字过滤历史"),
-        ("Enter", "执行高亮命令"),
-        ("Tab", "选中命令到命令行"),
-        ("Alt + s", "切换时间 / 频率排序"),
-        ("Alt + n", "进入数字跳转模式"),
-        ("Alt + h", "显示 / 隐藏此帮助"),
-        ("Esc", "退出（跳转模式中取消）"),
-        ("Ctrl + C", "强制退出"),
-        ("↑ ↓ PgUp PgDn", "上下导航 / 翻页"),
-        ("← → Home End", "搜索框内移动光标"),
-        ("Backspace Del", "搜索框内删除字符"),
+    let mod_name = modifier_name(app.modifier);
+    let mk = |ch: char| format!("{} + {}", mod_name, ch);
+
+    let pairs: Vec<(String, &str)> = vec![
+        ("按键".to_string(), "功能"),
+        (String::new(), ""),
+        ("> keyword".to_string(), "输入关键字过滤历史"),
+        ("Enter".to_string(), "执行高亮命令"),
+        ("Tab".to_string(), "选中命令到命令行"),
+        (mk(app.key_toggle_sort), "切换时间 / 频率排序"),
+        (mk(app.key_toggle_numbers), "进入数字跳转模式"),
+        (mk(app.key_toggle_help), "显示 / 隐藏此帮助"),
+        (mk(app.key_set_limit), "设置显示条数"),
+        ("Esc".to_string(), "退出（跳转模式中取消）"),
+        ("Ctrl + C".to_string(), "强制退出"),
+        ("↑ ↓ PgUp PgDn".to_string(), "上下导航 / 翻页"),
+        ("← → Home End".to_string(), "搜索框内移动光标"),
+        ("Backspace Del".to_string(), "搜索框内删除字符"),
     ];
 
     let inner = Block::default().borders(Borders::ALL)
@@ -597,7 +612,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         .split(inner_area);
 
     let keys: Vec<Line> = pairs.iter().map(|(k, _)| {
-        Line::from(Span::styled(*k, key_style))
+        Line::from(Span::styled(k.as_str(), key_style))
     }).collect();
     let descs: Vec<Line> = pairs.iter().map(|(_, d)| {
         Line::from(Span::styled(*d, desc_style))
@@ -605,6 +620,24 @@ fn render_help(f: &mut Frame, area: Rect) {
 
     f.render_widget(Paragraph::new(keys), chunks[0]);
     f.render_widget(Paragraph::new(descs), chunks[1]);
+}
+
+/// Convert KeyModifiers to a human-readable string.
+fn modifier_name(m: KeyModifiers) -> String {
+    if m.is_empty() {
+        return String::new();
+    }
+    let mut parts = Vec::new();
+    if m.contains(KeyModifiers::CONTROL) {
+        parts.push("Ctrl");
+    }
+    if m.contains(KeyModifiers::ALT) {
+        parts.push("Alt");
+    }
+    if m.contains(KeyModifiers::SHIFT) {
+        parts.push("Shift");
+    }
+    parts.join(" + ")
 }
 
 /// Strip ANSI escape codes from a string to prevent terminal corruption.

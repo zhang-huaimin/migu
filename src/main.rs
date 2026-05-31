@@ -1,4 +1,5 @@
 mod cli;
+mod config;
 mod db;
 mod shell;
 mod tui;
@@ -57,7 +58,13 @@ fn run_import(shell: &str) {
         }
     };
 
-    let path = db::db_path();
+    let cfg = config::load();
+    let path = cfg
+        .database
+        .path
+        .as_ref()
+        .map(|p| p.into())
+        .unwrap_or_else(|| db::db_path());
     let conn = match db::open(&path) {
         Ok(c) => c,
         Err(e) => {
@@ -210,7 +217,8 @@ fn run_add(
         return;
     }
 
-    let path = db::db_path();
+    let cfg = config::load();
+    let path = cfg.database.path.as_deref().map(|p| p.into()).unwrap_or_else(|| db::db_path());
     let conn = match db::open(&path) {
         Ok(c) => c,
         Err(e) => {
@@ -242,7 +250,14 @@ fn run_add(
 
 /// Launch the interactive TUI.
 fn run_tui(cli: &Cli) {
-    let path = cli.database.as_ref().map(|p| p.into()).unwrap_or_else(|| db::db_path());
+    let cfg = config::load();
+
+    let path = cli
+        .database
+        .as_ref()
+        .map(|p| p.into())
+        .or_else(|| cfg.database.path.as_ref().map(|p| p.into()))
+        .unwrap_or_else(|| db::db_path());
     let conn = match db::open(&path) {
         Ok(c) => c,
         Err(e) => {
@@ -256,7 +271,10 @@ fn run_tui(cli: &Cli) {
         .and_then(|p| p.to_str().map(|s| s.to_string()))
         .unwrap_or_default();
 
-    match tui::run(&conn, &cwd, cli.limit as usize) {
+    let modifier = config::parse_modifier(&cfg.keys.modifier);
+    let kc = &cfg.keys;
+
+    match tui::run(&conn, &cwd, cli.limit as usize, modifier, kc) {
         Ok(Action::Insert(cmd)) => {
             if std::env::var("MIGU_WIDGET").is_ok() {
                 // Widget mode: write to temp file
@@ -271,7 +289,6 @@ fn run_tui(cli: &Cli) {
             eprintln!("\x1b[1;36m$\x1b[0m {}", cmd);
 
             // Record the executed command in the database
-            let path = db::db_path();
             if let Ok(conn) = db::open(&path) {
                 let host = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
                 let sh = detect_shell();

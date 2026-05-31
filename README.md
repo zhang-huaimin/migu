@@ -60,15 +60,17 @@ Press **Ctrl-R** to open the TUI browser:
 | `↑` `↓` | Navigate |
 | **Enter** | Execute selected command |
 | **Tab** | Insert command into prompt (editable) |
-| **Alt + s** | Toggle Time / Frequency mode |
-| **Alt + n** | Enter number-input mode, digits + Enter to jump |
-| **Alt + l** | Change display limit |
-| **Alt + h** | Show help |
+| `Alt + s` | Toggle Time / Frequency mode |
+| `Alt + n` | Enter number-input mode, digits + Enter to jump |
+| `Alt + l` | Change display limit |
+| `Alt + h` | Show help |
 | `←` `→` `Home` `End` | Move cursor in search bar |
 | `Backspace` / `Delete` | Edit search text |
 | Type any text | Fuzzy filter |
 | `PgUp` / `PgDn` | Page scroll |
 | `Esc` / `Ctrl-C` | Quit |
+
+> Tip: Key bindings are configurable via `~/.migu/config.toml`.
 
 ### Direct invocation
 
@@ -158,11 +160,29 @@ end
 bind \cr _migu_widget
 ```
 
+## Configuration
+
+Optional config file at `~/.migu/config.toml`:
+
+```toml
+[database]
+# Custom database path (default: ~/.migu/history.db)
+path = "/mnt/data/migu/history.db"
+
+[keys]
+# Modifier key: "Alt" (default), "Ctrl", "Ctrl+Shift", or "" for none
+modifier = "Alt"
+
+# Character keys for each action (must be a single character)
+toggle_sort = "s"       # default: Alt+s
+toggle_numbers = "n"    # default: Alt+n
+toggle_help = "h"       # default: Alt+h
+set_limit = "l"         # default: Alt+l
+```
+
 ## Database
 
-Location: `~/.local/share/migu/history.db` (SQLite, WAL mode)
-
-Auto-purges to 100,000 entries (configurable via `MIGU_MAX_ENTRIES` env var).
+Location: `~/.migu/history.db` (SQLite, WAL mode). Directory permissions: `700`, file permissions: `600`.
 
 ## Build
 
@@ -172,4 +192,4 @@ cargo build --release
 
 Requirements: Rust 1.70+
 
-Dependencies: `rusqlite`, `clap`, `ratatui`, `crossterm`, `chrono`, `dirs`, `libc`, `rand`, `shell-words`, `whoami`
+Dependencies: `rusqlite`, `clap`, `ratatui`, `crossterm`, `chrono`, `dirs`, `libc`, `rand`, `shell-words`, `whoami`, `toml`, `serde`
