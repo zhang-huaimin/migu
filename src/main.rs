@@ -6,6 +6,7 @@ mod tui;
 use clap::Parser;
 use crate::cli::{Cli, Commands};
 use crate::tui::Action;
+use std::io::BufRead;
 use std::process::{self, Command};
 
 fn main() {
@@ -26,11 +27,127 @@ fn main() {
             let script = shell::init_script(shell);
             println!("{}", script);
         }
+        Some(Commands::Import { shell }) => {
+            run_import(shell);
+        }
         None => {
             // Default: launch TUI
             run_tui(&cli);
         }
     }
+}
+
+/// Import existing history from a shell's native history file.
+fn run_import(shell: &str) {
+    let history_file = match shell {
+        "bash" => dirs::home_dir().map(|h| h.join(".bash_history")),
+        "zsh" => dirs::home_dir().map(|h| h.join(".zsh_history")),
+        "fish" => dirs::data_local_dir().map(|d| d.join("fish").join("fish_history")),
+        _ => {
+            eprintln!("migu: unsupported shell for import: {}", shell);
+            process::exit(1);
+        }
+    };
+
+    let history_file = match history_file {
+        Some(f) if f.exists() => f,
+        _ => {
+            eprintln!("migu: history file not found for {}", shell);
+            process::exit(1);
+        }
+    };
+
+    let path = db::db_path();
+    let conn = match db::open(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("migu: failed to open database: {}", e);
+            process::exit(1);
+        }
+    };
+
+    let host = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
+    let file = match std::fs::File::open(&history_file) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("migu: failed to open history file: {}", e);
+            process::exit(1);
+        }
+    };
+
+    let reader = std::io::BufReader::new(file);
+    let mut count = 0u64;
+
+    // Use a transaction for bulk import performance
+    if let Err(e) = conn.execute("BEGIN", []) {
+        eprintln!("migu: failed to begin transaction: {}", e);
+        process::exit(1);
+    }
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
+        let line = line.trim().to_string();
+        if line.is_empty() {
+            continue;
+        }
+
+        let cmd = match shell {
+            "bash" => parse_bash_line(&line),
+            "zsh" => parse_zsh_line(&line),
+            "fish" => parse_fish_line(&line),
+            _ => None,
+        };
+
+        if let Some(cmd) = cmd {
+            if let Err(e) = db::insert_command(&conn, &cmd, &host, shell, None, None, None) {
+                eprintln!("migu: failed to insert command: {}", e);
+            } else {
+                count += 1;
+            }
+        }
+    }
+
+    if let Err(e) = conn.execute("COMMIT", []) {
+        eprintln!("migu: failed to commit: {}", e);
+        process::exit(1);
+    }
+
+    eprintln!("migu: imported {} commands from {} history", count, shell);
+}
+
+/// Parse a line from bash history.
+/// Lines starting with "#" followed by digits are HISTTIMEFORMAT timestamps.
+fn parse_bash_line(line: &str) -> Option<String> {
+    // Skip timestamp lines: "#1234567890"
+    if line.starts_with('#') && line[1..].chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    Some(line.to_string())
+}
+
+/// Parse a line from zsh history.
+/// Format: ": 1234567890:0;command"
+fn parse_zsh_line(line: &str) -> Option<String> {
+    // Zsh extended history format: ": <timestamp>:<duration>;<command>"
+    if line.starts_with(':') {
+        if let Some(pos) = line.rfind(';') {
+            return Some(line[pos + 1..].to_string());
+        }
+    }
+    Some(line.to_string())
+}
+
+/// Parse a line from fish history.
+/// Fish uses YAML-like blocks: "- cmd: <command>" are the command lines.
+/// Non-command lines ("  when: ...", etc.) are skipped.
+fn parse_fish_line(line: &str) -> Option<String> {
+    if let Some(cmd) = line.strip_prefix("- cmd: ") {
+        return Some(cmd.to_string());
+    }
+    None
 }
 
 /// Handle the `re add` subcommand.

@@ -53,4 +53,10 @@ pub enum Commands {
         #[arg(value_parser = ["bash", "zsh", "fish"])]
         shell: String,
     },
+    /// Import existing shell history into the database
+    Import {
+        /// Source shell: bash, zsh, or fish
+        #[arg(value_parser = ["bash", "zsh", "fish"])]
+        shell: String,
+    },
 }

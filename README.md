@@ -85,6 +85,7 @@ migu --no-dedup   # don't fold consecutive duplicates
 | `migu` | Launch TUI browser |
 | `migu add -- <command>` | Record a command (called by shell hooks) |
 | `migu init <shell>` | Output shell configuration (bash / zsh / fish) |
+| `migu import <shell>` | Import existing shell history into database |
 | `migu -n <N>` | Set max results (default 30, max 100) |
 | `migu --no-dedup` | Show all entries without dedup |
 

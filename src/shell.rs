@@ -31,6 +31,9 @@ _migu_widget() {
     READLINE_POINT=${#READLINE_LINE}
 }
 bind -x '"\C-r": _migu_widget' 2>/dev/null
+
+# Import existing history on first setup (runs in background)
+(migu import bash 2>/dev/null &)
 "###;
 
 const ZSH_INIT: &str = r###"
@@ -59,6 +62,9 @@ _migu_widget() {
 }
 zle -N _migu_widget
 bindkey '^R' _migu_widget
+
+# Import existing history on first setup (runs in background)
+(migu import zsh 2>/dev/null &)
 "###;
 
 const FISH_INIT: &str = r###"
@@ -84,4 +90,7 @@ function _migu_widget
     commandline -r -- $cmd
 end
 bind \cr _migu_widget
+
+# Import existing history on first setup (runs in background)
+migu import fish 2>/dev/null &
 "###;
