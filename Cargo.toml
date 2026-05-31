@@ -1,0 +1,17 @@
+[package]
+name = "migu"
+version = "0.1.0"
+edition = "2021"
+description = "Cross-shell command history manager. Named after 迷榖, the mythical tree from Shan Hai Jing that keeps you from getting lost."
+
+[dependencies]
+rusqlite = { version = "0.31", features = ["bundled"] }
+clap = { version = "4", features = ["derive"] }
+ratatui = "0.28"
+crossterm = "0.28"
+chrono = "0.4"
+dirs = "5"
+shell-words = "1"
+whoami = "1"
+rand = "0.8"
+libc = "0.2"
