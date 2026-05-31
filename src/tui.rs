@@ -569,75 +569,42 @@ fn render_help(f: &mut Frame, area: Rect) {
     let key_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
     let desc_style = Style::default().fg(Color::White);
 
-    let lines = vec![
-        Line::from(vec![
-            Span::styled(" 按键", key_style),
-            Span::raw("          "),
-            Span::styled("功能", key_style),
-        ]),
-        Line::from(Span::raw("")),
-        Line::from(vec![
-            Span::styled(" > keyword", key_style),
-            Span::raw("      "),
-            Span::styled("输入关键字过滤历史", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled(" Enter", key_style),
-            Span::raw("         "),
-            Span::styled("执行高亮命令", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled(" Tab", key_style),
-            Span::raw("           "),
-            Span::styled("选中命令到命令行", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled(" Alt + s", key_style),
-            Span::raw("      "),
-            Span::styled("切换时间 / 频率排序", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled(" Alt + n", key_style),
-            Span::raw("      "),
-            Span::styled("进入数字跳转模式", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled(" Alt + h", key_style),
-            Span::raw("      "),
-            Span::styled("显示 / 隐藏此帮助", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled(" Esc", key_style),
-            Span::raw("          "),
-            Span::styled("退出（跳转模式中取消）", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled(" Ctrl + C", key_style),
-            Span::raw("     "),
-            Span::styled("强制退出", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled(" ↑ ↓ PgUp PgDn", key_style),
-            Span::raw(" "),
-            Span::styled("上下导航 / 翻页", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled(" ← → Home End", key_style),
-            Span::raw(" "),
-            Span::styled("搜索框内移动光标", desc_style),
-        ]),
-        Line::from(vec![
-            Span::styled(" Backspace Del", key_style),
-            Span::raw(""),
-            Span::styled("搜索框内删除字符", desc_style),
-        ]),
+    let pairs: Vec<(&str, &str)> = vec![
+        ("按键", "功能"),
+        ("", ""),
+        ("> keyword", "输入关键字过滤历史"),
+        ("Enter", "执行高亮命令"),
+        ("Tab", "选中命令到命令行"),
+        ("Alt + s", "切换时间 / 频率排序"),
+        ("Alt + n", "进入数字跳转模式"),
+        ("Alt + h", "显示 / 隐藏此帮助"),
+        ("Esc", "退出（跳转模式中取消）"),
+        ("Ctrl + C", "强制退出"),
+        ("↑ ↓ PgUp PgDn", "上下导航 / 翻页"),
+        ("← → Home End", "搜索框内移动光标"),
+        ("Backspace Del", "搜索框内删除字符"),
     ];
 
-    let para = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Rgb(5, 122, 212)))
-            .title(" 帮助 "))
-        .style(Style::default());
-    f.render_widget(para, area);
+    let inner = Block::default().borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Rgb(5, 122, 212)))
+        .title(" 帮助 ");
+    let inner_area = inner.inner(area);
+    f.render_widget(inner, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(18), Constraint::Min(0)])
+        .split(inner_area);
+
+    let keys: Vec<Line> = pairs.iter().map(|(k, _)| {
+        Line::from(Span::styled(*k, key_style))
+    }).collect();
+    let descs: Vec<Line> = pairs.iter().map(|(_, d)| {
+        Line::from(Span::styled(*d, desc_style))
+    }).collect();
+
+    f.render_widget(Paragraph::new(keys), chunks[0]);
+    f.render_widget(Paragraph::new(descs), chunks[1]);
 }
 
 /// Strip ANSI escape codes from a string to prevent terminal corruption.
