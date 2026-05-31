@@ -16,7 +16,7 @@ const BASH_INIT: &str = r###"
 # Record every command before the prompt is displayed
 _migu_prompt_command() {
     local cmd
-    cmd="$(history 1 | sed 's/^ *[0-9][0-9]* *//')"
+    cmd="$(history 1 | sed 's/^ *[0-9][0-9]* *[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] *//' | sed 's/^ *[0-9][0-9]* *//')"
     migu add -- "$cmd"
 }
 PROMPT_COMMAND=_migu_prompt_command
