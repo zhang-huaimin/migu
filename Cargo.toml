@@ -2,7 +2,14 @@
 name = "migu"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.70"
 description = "Cross-shell command history manager. Named after 迷榖, the mythical tree from Shan Hai Jing that keeps you from getting lost."
+authors = ["gloria <aatroxfly@gmail.com>"]
+license = "GPL-2.0-only"
+repository = "https://github.com/zhang-huaimin/migu"
+readme = "README.md"
+keywords = ["shell", "history", "tui", "cli", "command"]
+categories = ["command-line-utilities", "command-line-interface"]
 
 [dependencies]
 rusqlite = { version = "0.31", features = ["bundled"] }
