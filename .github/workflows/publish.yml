@@ -1,0 +1,30 @@
+name: Publish to crates.io
+
+on:
+    push:
+        tags:
+            - "v*" # 只有推送 v 开头的 tag（如 v0.1.0）才触发
+
+jobs:
+    publish:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Setup Rust
+              uses: dtolnay/rust-toolchain@stable
+
+            - name: Check version matches tag
+              run: |
+                  TAG_VERSION=${GITHUB_REF#refs/tags/v}
+                  CARGO_VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+                  if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+                    echo "Tag version $TAG_VERSION != Cargo.toml version $CARGO_VERSION"
+                    exit 1
+                  fi
+
+            - name: Dry run (pre-check)
+              run: cargo publish --dry-run --locked --token ${{ secrets.CRATES_IO_TOKEN }}
+
+            - name: Publish to crates.io
+              run: cargo publish --locked --token ${{ secrets.CRATES_IO_TOKEN }}
