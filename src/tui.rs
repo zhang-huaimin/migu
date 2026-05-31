@@ -291,6 +291,10 @@ fn run_loop(
                 KeyCode::Backspace if app.limit_mode => {
                     app.limit_input.pop();
                 }
+                // Ctrl+H sends Backspace on some terminals
+                KeyCode::Char('h') if app.limit_mode && key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    app.limit_input.pop();
+                }
                 KeyCode::Enter if app.limit_mode => {
                     if let Ok(n) = app.limit_input.parse::<usize>() {
                         let n = n.clamp(1, 100);
@@ -366,6 +370,20 @@ fn run_loop(
                         app.number_buf.clear();
                     } else if app.cursor_pos > 0 {
                         // Delete char before cursor
+                        let mut prev = app.cursor_pos - 1;
+                        while prev > 0 && !app.keyword.is_char_boundary(prev) {
+                            prev -= 1;
+                        }
+                        app.keyword.remove(prev);
+                        app.cursor_pos = prev;
+                        app.load_entries(conn);
+                    }
+                }
+                // Ctrl+H sends Backspace on some terminals
+                KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    if !app.number_buf.is_empty() {
+                        app.number_buf.clear();
+                    } else if app.cursor_pos > 0 {
                         let mut prev = app.cursor_pos - 1;
                         while prev > 0 && !app.keyword.is_char_boundary(prev) {
                             prev -= 1;
