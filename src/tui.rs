@@ -456,8 +456,14 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
 
 fn render_divider(f: &mut Frame, area: Rect, app: &App) {
     let text = format!(" {}/{}", app.selected.saturating_add(1).min(app.entries.len()), app.entries.len());
-    let padded = format!("{:width$}", text, width = area.width as usize);
-    let span = Span::styled(padded, Style::default().fg(Color::Rgb(86, 95, 95)).bg(Color::Black));
+    let line_char = "─";
+    let total = area.width as usize;
+    let right_len = total.saturating_sub(text.len());
+    let line = format!("{} {}",
+        text,
+        line_char.repeat(right_len.saturating_sub(1)),
+    );
+    let span = Span::styled(line, Style::default().fg(Color::Rgb(95, 95, 95)));
     f.render_widget(Paragraph::new(Line::from(span)), area);
 }
 
