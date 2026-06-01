@@ -294,6 +294,12 @@ fn run_tui(cli: &Cli) {
             // Echo the command so the user sees what was executed
             eprintln!("\x1b[1;36m$\x1b[0m {}", cmd);
 
+            // In widget mode, pass command back so the shell can record it
+            if std::env::var("MIGU_WIDGET").is_ok() {
+                let _ = std::fs::write("/tmp/migu-cmd", &cmd);
+                let _ = std::fs::write("/tmp/migu-exec", "");
+            }
+
             // Record the executed command in the database
             if let Ok(conn) = db::open(&path) {
                 let host = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());

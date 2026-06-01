@@ -26,9 +26,19 @@ _migu_widget() {
     MIGU_WIDGET=1 command migu
     local cmd
     cmd="$(cat /tmp/migu-cmd 2>/dev/null)"
-    rm -f /tmp/migu-cmd
-    READLINE_LINE="${cmd:-$READLINE_LINE}"
-    READLINE_POINT=${#READLINE_LINE}
+    if [ -n "$cmd" ]; then
+        if [ -f /tmp/migu-exec ]; then
+            rm -f /tmp/migu-exec
+            rm -f /tmp/migu-cmd
+            # Append to history file so up-arrow can recall it
+            echo "$cmd" >> ~/.bash_history
+            history -n
+        else
+            rm -f /tmp/migu-cmd
+            READLINE_LINE="$cmd"
+            READLINE_POINT=${#READLINE_LINE}
+        fi
+    fi
 }
 bind -x '"\C-r": _migu_widget' 2>/dev/null
 
@@ -56,9 +66,17 @@ add-zsh-hook preexec _migu_add_hook
 _migu_widget() {
     MIGU_WIDGET=1 command migu
     local cmd="$(cat /tmp/migu-cmd 2>/dev/null)"
-    rm -f /tmp/migu-cmd
-    zle reset-prompt
-    LBUFFER+="$cmd"
+    if [ -n "$cmd" ]; then
+        if [ -f /tmp/migu-exec ]; then
+            rm -f /tmp/migu-exec
+            rm -f /tmp/migu-cmd
+            print -s -- "$cmd"
+        else
+            rm -f /tmp/migu-cmd
+            zle reset-prompt
+            LBUFFER+="$cmd"
+        fi
+    fi
 }
 zle -N _migu_widget
 bindkey '^R' _migu_widget
@@ -86,8 +104,16 @@ end
 function _migu_widget
     MIGU_WIDGET=1 command migu
     set -l cmd (cat /tmp/migu-cmd 2>/dev/null)
-    rm -f /tmp/migu-cmd
-    commandline -r -- $cmd
+    if test -n "$cmd"
+        if test -f /tmp/migu-exec
+            rm -f /tmp/migu-exec
+            rm -f /tmp/migu-cmd
+            builtin history add -- "$cmd"
+        else
+            rm -f /tmp/migu-cmd
+            commandline -r -- $cmd
+        end
+    end
 end
 bind \cr _migu_widget
 
