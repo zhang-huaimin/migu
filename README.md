@@ -69,6 +69,7 @@ Press **Ctrl-R** to open the TUI browser:
 | Type any text | Fuzzy filter |
 | `PgUp` / `PgDn` | Page scroll |
 | `Esc` / `Ctrl-C` | Quit |
+| `Alt + z` | Toggle expand mode: show full command below the list |
 
 > Tip: Key bindings are configurable via `~/.migu/config.toml`.
 

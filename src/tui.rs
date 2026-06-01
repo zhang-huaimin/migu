@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
     Frame, Terminal,
 };
 use std::io;
@@ -57,6 +57,8 @@ pub struct App {
     pub key_toggle_numbers: char,
     pub key_toggle_help: char,
     pub key_set_limit: char,
+    /// Whether the selected entry is expanded to show full command
+    pub expanded: bool,
 }
 
 impl App {
@@ -85,6 +87,7 @@ impl App {
             key_toggle_numbers: kc.toggle_numbers,
             key_toggle_help: kc.toggle_help,
             key_set_limit: kc.set_limit,
+            expanded: false,
         }
     }
 
@@ -277,6 +280,10 @@ fn run_loop(
                     app.limit_mode = true;
                     app.limit_input.clear();
                 }
+                // Alt+Z: toggle expand mode
+                KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::ALT) => {
+                    app.expanded = !app.expanded;
+                }
                 KeyCode::Char(c) if app.limit_mode && c.is_ascii_digit() => {
                     app.limit_input.push(c);
                 }
@@ -420,12 +427,31 @@ fn ui(f: &mut Frame, app: &mut App) {
 
     let area = f.area();
 
+    let expanded_height = if app.expanded && !app.entries.is_empty() {
+        let entry = &app.entries[app.selected];
+        let text = strip_ansi(&entry.command);
+        let width = area.width.max(1) as usize;
+        let lines: usize = text.lines()
+            .map(|l| (l.chars().count().max(1) + width - 1) / width)
+            .sum();
+        (lines as u16).clamp(2, area.height / 2)
+    } else {
+        0
+    };
+    let list_height = if expanded_height > 0 {
+        Constraint::Length(area.height.saturating_sub(3 + expanded_height + 1).max(1))
+    } else {
+        Constraint::Min(1)
+    };
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),  // header
             Constraint::Length(1),  // divider
-            Constraint::Min(1),     // list
+            list_height,
+            Constraint::Length(if expanded_height > 0 { 1 } else { 0 }), // separator
+            Constraint::Length(expanded_height), // expanded detail
             Constraint::Length(1),  // footer
         ])
         .split(area);
@@ -433,7 +459,13 @@ fn ui(f: &mut Frame, app: &mut App) {
     render_header(f, chunks[0], app);
     render_divider(f, chunks[1], app);
     render_list(f, chunks[2], app);
-    render_footer(f, chunks[3], app);
+    if expanded_height > 0 {
+        let sep_line = "─".repeat(area.width as usize);
+        let sep = Paragraph::new(Line::from(Span::styled(sep_line, Style::default().fg(Color::Rgb(95, 95, 95)))));
+        f.render_widget(sep, chunks[3]);
+        render_expanded_detail(f, chunks[4], app);
+    }
+    render_footer(f, chunks[5], app);
 }
 
 fn render_header(f: &mut Frame, area: Rect, app: &App) {
@@ -523,10 +555,7 @@ fn render_list(f: &mut Frame, area: Rect, app: &mut App) {
             };
 
             let line = Line::from(vec![
-                Span::styled(
-                    num,
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-                ),
+                Span::styled(num, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
                 Span::raw(format!(" {} ", cmd_text)),
                 Span::styled(cwd_display, Style::default().fg(Color::DarkGray)),
                 Span::raw("  "),
@@ -548,7 +577,23 @@ fn render_list(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(list, area);
 }
 
+fn render_expanded_detail(f: &mut Frame, area: Rect, app: &App) {
+    let entry = match app.entries.get(app.selected) {
+        Some(e) => e,
+        None => return,
+    };
+    let text = strip_ansi(&entry.command);
+    let para = Paragraph::new(text)
+        .wrap(Wrap { trim: false })
+        .style(Style::default().fg(Color::Rgb(200, 200, 200)));
+    f.render_widget(para, area);
+}
+
 fn render_footer(f: &mut Frame, area: Rect, app: &App) {
+    // In expanded mode, footer is hidden
+    if app.expanded && !app.entries.is_empty() {
+        return;
+    }
     let selected_entry = app.entries.get(app.selected);
 
     if let Some(entry) = selected_entry {
@@ -594,6 +639,7 @@ fn render_help(f: &mut Frame, area: Rect, app: &App) {
         (mk(app.key_toggle_help), "显示 / 隐藏此帮助"),
         (mk(app.key_set_limit), "设置显示条数"),
         ("Esc".to_string(), "退出（跳转模式中取消）"),
+        ("Alt + z".to_string(), "展开 / 折叠选中命令"),
         ("Ctrl + C".to_string(), "强制退出"),
         ("↑ ↓ PgUp PgDn".to_string(), "上下导航 / 翻页"),
         ("← → Home End".to_string(), "搜索框内移动光标"),
