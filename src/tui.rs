@@ -14,7 +14,7 @@ use ratatui::{
 use std::io;
 use std::time::Duration;
 
-use crate::config::KeyConfig;
+use crate::config::ResolvedKeys;
 use crate::db::{HistoryEntry, query_collapsed};
 
 /// Action the user took in the TUI.
@@ -52,17 +52,20 @@ pub struct App {
     /// First visible row index (for scroll)
     pub scroll_offset: usize,
     /// Key bindings from config
-    pub modifier: KeyModifiers,
+    pub mod_toggle_sort: KeyModifiers,
     pub key_toggle_sort: char,
+    pub mod_toggle_numbers: KeyModifiers,
     pub key_toggle_numbers: char,
+    pub mod_toggle_help: KeyModifiers,
     pub key_toggle_help: char,
+    pub mod_set_limit: KeyModifiers,
     pub key_set_limit: char,
     /// Whether the selected entry is expanded to show full command
     pub expanded: bool,
 }
 
 impl App {
-    pub fn new(cwd: String, limit: usize, modifier: KeyModifiers, kc: &KeyConfig) -> Self {
+    pub fn new(cwd: String, limit: usize, keys: &ResolvedKeys) -> Self {
         Self {
             frequent_mode: false,
             keyword: String::new(),
@@ -82,11 +85,14 @@ impl App {
             show_help: false,
             total_count: 0,
             scroll_offset: 0,
-            modifier,
-            key_toggle_sort: kc.toggle_sort,
-            key_toggle_numbers: kc.toggle_numbers,
-            key_toggle_help: kc.toggle_help,
-            key_set_limit: kc.set_limit,
+            mod_toggle_sort: keys.toggle_sort.0,
+            key_toggle_sort: keys.toggle_sort.1,
+            mod_toggle_numbers: keys.toggle_numbers.0,
+            key_toggle_numbers: keys.toggle_numbers.1,
+            mod_toggle_help: keys.toggle_help.0,
+            key_toggle_help: keys.toggle_help.1,
+            mod_set_limit: keys.set_limit.0,
+            key_set_limit: keys.set_limit.1,
             expanded: false,
         }
     }
@@ -182,8 +188,7 @@ pub fn run(
     conn: &rusqlite::Connection,
     cwd: &str,
     limit: usize,
-    modifier: KeyModifiers,
-    kc: &KeyConfig,
+    keys: &ResolvedKeys,
 ) -> io::Result<Action> {
     enable_raw_mode()?;
     execute!(io::stdout(), EnterAlternateScreen, SetCursorStyle::BlinkingBar)?;
@@ -194,7 +199,7 @@ pub fn run(
     let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(cwd.to_string(), limit, modifier, kc);
+    let mut app = App::new(cwd.to_string(), limit, keys);
     app.load_entries(conn);
 
     let result = run_loop(&mut terminal, &mut app, conn);
@@ -263,20 +268,20 @@ fn run_loop(
                         app.quit = true;
                     }
                 }
-                KeyCode::Char(_) if is_mod_key(&key, app.modifier, app.key_toggle_sort) => {
+                KeyCode::Char(_) if is_mod_key(&key, app.mod_toggle_sort, app.key_toggle_sort) => {
                     app.toggle_mode();
                     let mode_name = if app.frequent_mode { "频率顺序" } else { "时间顺序" };
                     app.notification = Some(mode_name.to_string());
                     app.notification_timer = 40;
                     app.load_entries(conn);
                 }
-                KeyCode::Char(_) if is_mod_key(&key, app.modifier, app.key_toggle_numbers) => {
+                KeyCode::Char(_) if is_mod_key(&key, app.mod_toggle_numbers, app.key_toggle_numbers) => {
                     app.num_mode = !app.num_mode;
                 }
-                KeyCode::Char(_) if is_mod_key(&key, app.modifier, app.key_toggle_help) => {
+                KeyCode::Char(_) if is_mod_key(&key, app.mod_toggle_help, app.key_toggle_help) => {
                     app.show_help = !app.show_help;
                 }
-                KeyCode::Char(_) if is_mod_key(&key, app.modifier, app.key_set_limit) => {
+                KeyCode::Char(_) if is_mod_key(&key, app.mod_set_limit, app.key_set_limit) => {
                     app.limit_mode = true;
                     app.limit_input.clear();
                 }
@@ -318,52 +323,47 @@ fn run_loop(
                 KeyCode::Down => {
                     app.move_down();
                 }
-                KeyCode::Left => {
-                    if app.cursor_pos > 0 {
+                KeyCode::Left
+                    if app.cursor_pos > 0 => {
                         let mut prev = app.cursor_pos - 1;
                         while prev > 0 && !app.keyword.is_char_boundary(prev) {
                             prev -= 1;
                         }
                         app.cursor_pos = prev;
                     }
-                }
-                KeyCode::Right => {
-                    if app.cursor_pos < app.keyword.len() {
+                KeyCode::Right
+                    if app.cursor_pos < app.keyword.len() => {
                         let mut next = app.cursor_pos + 1;
                         while next < app.keyword.len() && !app.keyword.is_char_boundary(next) {
                             next += 1;
                         }
                         app.cursor_pos = next;
                     }
-                }
                 KeyCode::Home => {
                     app.cursor_pos = 0;
                 }
                 KeyCode::End => {
                     app.cursor_pos = app.keyword.len();
                 }
-                KeyCode::PageDown => {
-                    if !app.entries.is_empty() {
+                KeyCode::PageDown
+                    if !app.entries.is_empty() => {
                         let page = 10usize;
                         app.selected = (app.selected + page).min(app.entries.len() - 1);
                         app.scroll_offset = (app.scroll_offset + page).min(app.entries.len().saturating_sub(20));
                     }
-                }
                 KeyCode::PageUp => {
                     let page = 10usize;
                     app.selected = app.selected.saturating_sub(page);
                     app.scroll_offset = app.scroll_offset.saturating_sub(page);
                 }
-                KeyCode::Tab => {
-                    if !app.jump_to_number() {
+                KeyCode::Tab
+                    if !app.jump_to_number() => {
                         app.select_insert();
                     }
-                }
-                KeyCode::Enter => {
-                    if !app.jump_to_number() {
+                KeyCode::Enter
+                    if !app.jump_to_number() => {
                         app.select_execute();
                     }
-                }
                 KeyCode::Backspace => {
                     if !app.number_buf.is_empty() {
                         app.number_buf.clear();
@@ -392,8 +392,8 @@ fn run_loop(
                         app.load_entries(conn);
                     }
                 }
-                KeyCode::Delete => {
-                    if app.cursor_pos < app.keyword.len() {
+                KeyCode::Delete
+                    if app.cursor_pos < app.keyword.len() => {
                         // Delete char at cursor
                         let mut next = app.cursor_pos + 1;
                         while next < app.keyword.len() && !app.keyword.is_char_boundary(next) {
@@ -402,15 +402,13 @@ fn run_loop(
                         app.keyword.drain(app.cursor_pos..next);
                         app.load_entries(conn);
                     }
-                }
-                KeyCode::Char(c) => {
-                    if c.is_ascii_graphic() || c == ' ' {
+                KeyCode::Char(c)
+                    if (c.is_ascii_graphic() || c == ' ') => {
                         app.number_buf.clear();
                         app.keyword.insert(app.cursor_pos, c);
                         app.cursor_pos += c.len_utf8();
                         app.load_entries(conn);
                     }
-                }
                 _ => {}
             }
         }
@@ -544,9 +542,9 @@ fn render_list(f: &mut Frame, area: Rect, app: &mut App) {
             let cmd_text = first_line(&entry.command);
             let cwd_display = entry.cwd.as_deref()
                 .filter(|c| *c != app.cwd)
-                .map(|c| shorten_cwd(c))
+                .map(shorten_cwd)
                 .unwrap_or_default();
-            let time_display = entry.created_at.as_deref().map(|t| relative_time(t)).unwrap_or_default();
+            let time_display = entry.created_at.as_deref().map(relative_time).unwrap_or_default();
 
             let freq_badge = if entry.freq > 1 {
                 format!(" (x{})", entry.freq)
@@ -625,8 +623,14 @@ fn render_help(f: &mut Frame, area: Rect, app: &App) {
     let key_style = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
     let desc_style = Style::default().fg(Color::White);
 
-    let mod_name = modifier_name(app.modifier);
-    let mk = |ch: char| format!("{} + {}", mod_name, ch);
+    let mk = |m: KeyModifiers, ch: char| {
+        let mod_name = modifier_name(m);
+        if mod_name.is_empty() {
+            ch.to_string()
+        } else {
+            format!("{} + {}", mod_name, ch)
+        }
+    };
 
     let pairs: Vec<(String, &str)> = vec![
         ("按键".to_string(), "功能"),
@@ -634,10 +638,10 @@ fn render_help(f: &mut Frame, area: Rect, app: &App) {
         ("> keyword".to_string(), "输入关键字过滤历史"),
         ("Enter".to_string(), "执行高亮命令"),
         ("Tab".to_string(), "选中命令到命令行"),
-        (mk(app.key_toggle_sort), "切换时间 / 频率排序"),
-        (mk(app.key_toggle_numbers), "进入数字跳转模式"),
-        (mk(app.key_toggle_help), "显示 / 隐藏此帮助"),
-        (mk(app.key_set_limit), "设置显示条数"),
+        (mk(app.mod_toggle_sort, app.key_toggle_sort), "切换时间 / 频率排序"),
+        (mk(app.mod_toggle_numbers, app.key_toggle_numbers), "进入数字跳转模式"),
+        (mk(app.mod_toggle_help, app.key_toggle_help), "显示 / 隐藏此帮助"),
+        (mk(app.mod_set_limit, app.key_set_limit), "设置显示条数"),
         ("Esc".to_string(), "退出（跳转模式中取消）"),
         ("Alt + z".to_string(), "展开 / 折叠选中命令"),
         ("Ctrl + C".to_string(), "强制退出"),

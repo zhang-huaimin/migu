@@ -166,19 +166,22 @@ bind \cr _migu_widget
 Optional config file at `~/.migu/config.toml`:
 
 ```toml
+[keys]
+# Global leader key, referenced as ${leader} in bindings below.
+# Default: "Alt". Supports: Alt, Ctrl, Shift, Ctrl+Shift, or "" for none.
+leader = "Alt"
+
+# Each binding can use ${leader} or specify its own combination.
+# Format: "Modifier + key" — last part is always the character key.
+toggle_sort = "${leader} + s"       # default: Alt + s
+toggle_numbers = "${leader} + n"    # default: Alt + n
+toggle_help = "${leader} + h"       # default: Alt + h
+set_limit = "${leader} + l"         # inherit leader
+# set_limit = "Alt + l"              # or override per binding
+
 [database]
 # Custom database path (default: ~/.migu/history.db)
 path = "/mnt/data/migu/history.db"
-
-[keys]
-# Modifier key: "Alt" (default), "Ctrl", "Ctrl+Shift", or "" for none
-modifier = "Alt"
-
-# Character keys for each action (must be a single character)
-toggle_sort = "s"       # default: Alt+s
-toggle_numbers = "n"    # default: Alt+n
-toggle_help = "h"       # default: Alt+h
-set_limit = "l"         # default: Alt+l
 ```
 
 ## Database

@@ -64,7 +64,7 @@ fn run_import(shell: &str) {
         .path
         .as_ref()
         .map(|p| p.into())
-        .unwrap_or_else(|| db::db_path());
+        .unwrap_or_else(db::db_path);
     let conn = match db::open(&path) {
         Ok(c) => c,
         Err(e) => {
@@ -218,7 +218,7 @@ fn run_add(
     }
 
     let cfg = config::load();
-    let path = cfg.database.path.as_deref().map(|p| p.into()).unwrap_or_else(|| db::db_path());
+    let path = cfg.database.path.as_deref().map(|p| p.into()).unwrap_or_else(db::db_path);
     let conn = match db::open(&path) {
         Ok(c) => c,
         Err(e) => {
@@ -257,7 +257,7 @@ fn run_tui(cli: &Cli) {
         .as_ref()
         .map(|p| p.into())
         .or_else(|| cfg.database.path.as_ref().map(|p| p.into()))
-        .unwrap_or_else(|| db::db_path());
+        .unwrap_or_else(db::db_path);
     let conn = match db::open(&path) {
         Ok(c) => c,
         Err(e) => {
@@ -271,10 +271,16 @@ fn run_tui(cli: &Cli) {
         .and_then(|p| p.to_str().map(|s| s.to_string()))
         .unwrap_or_default();
 
-    let modifier = config::parse_modifier(&cfg.keys.modifier);
-    let kc = &cfg.keys;
+    let ks = &cfg.keys;
+    let leader = &ks.leader;
+    let keys = config::ResolvedKeys {
+        toggle_sort: config::resolve_binding(&ks.toggle_sort, leader),
+        toggle_numbers: config::resolve_binding(&ks.toggle_numbers, leader),
+        toggle_help: config::resolve_binding(&ks.toggle_help, leader),
+        set_limit: config::resolve_binding(&ks.set_limit, leader),
+    };
 
-    match tui::run(&conn, &cwd, cli.limit as usize, modifier, kc) {
+    match tui::run(&conn, &cwd, cli.limit as usize, &keys) {
         Ok(Action::Insert(cmd)) => {
             if std::env::var("MIGU_WIDGET").is_ok() {
                 // Widget mode: write to temp file
