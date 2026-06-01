@@ -202,6 +202,25 @@ fn detect_shell() -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+/// Build a shell-style prompt from user, hostname, and cwd.
+fn shell_prompt(cwd: &str) -> String {
+    let user = whoami::username();
+    let host = whoami::fallible::hostname().unwrap_or_else(|_| "host".to_string());
+    let home = dirs::home_dir()
+        .and_then(|h| h.to_str().map(|s| s.to_string()))
+        .unwrap_or_default();
+    let dir = if !home.is_empty() && cwd.starts_with(&home) {
+        format!("~{}", &cwd[home.len()..])
+    } else {
+        cwd.to_string()
+    };
+    // Green user@host, blue directory, white $
+    format!(
+        "\x1b[1;32m{}@{}\x1b[0m:\x1b[1;34m{}\x1b[0m$",
+        user, host, dir
+    )
+}
+
 /// Handle the `re add` subcommand.
 fn run_add(
     command: &[String],
@@ -291,8 +310,9 @@ fn run_tui(cli: &Cli) {
             }
         }
         Ok(Action::Execute(cmd)) => {
-            // Echo the command so the user sees what was executed
-            eprintln!("\x1b[1;36m$\x1b[0m {}", cmd);
+            // Echo the command with a shell-style prompt
+            let prompt = shell_prompt(&cwd);
+            eprintln!("{} {}", prompt, cmd);
 
             // In widget mode, pass command back so the shell can record it
             if std::env::var("MIGU_WIDGET").is_ok() {
@@ -307,8 +327,10 @@ fn run_tui(cli: &Cli) {
                 let _ = db::insert_command(&conn, &cmd, &host, &sh, Some(&cwd), None, None);
             }
 
-            // Restore terminal already done in tui::run
-            let status = Command::new("sh")
+            // Use user's shell in interactive mode so aliases (like ls --color=auto) work
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
+            let status = Command::new(&shell)
+                .arg("-i")
                 .arg("-c")
                 .arg(&cmd)
                 .spawn()
