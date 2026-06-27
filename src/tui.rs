@@ -15,7 +15,7 @@ use std::io;
 use std::time::Duration;
 
 use crate::config::ResolvedKeys;
-use crate::db::{HistoryEntry, delete_command, query_collapsed};
+use crate::db::{HistoryEntry, delete_by_ids, query_collapsed};
 
 /// Action the user took in the TUI.
 #[derive(Debug, Clone)]
@@ -274,7 +274,8 @@ fn run_loop(
                     if let KeyCode::Char('y' | 'Y') = key.code {
                         if let Some(idx) = app.delete_confirm.take() {
                             if let Some(entry) = app.entries.get(idx) {
-                                match delete_command(conn, &entry.command, entry.cwd.as_deref()) {
+                                let ids = entry.row_ids.clone();
+                                match delete_by_ids(conn, &ids) {
                                     Ok(n) => {
                                         app.notification = Some(format!("已删除 {} 条记录", n));
                                         app.notification_timer = 60;
@@ -410,8 +411,8 @@ fn run_loop(
                         app.notification = Some(format!("删除 '{}'? (y/N)", cmd_name));
                         app.notification_timer = 0; // persist until action
                     } else {
-                        let entry = &app.entries[app.selected];
-                        match delete_command(conn, &entry.command, entry.cwd.as_deref()) {
+                        let ids = app.entries[app.selected].row_ids.clone();
+                        match delete_by_ids(conn, &ids) {
                             Ok(n) => {
                                 app.notification = Some(format!("已删除 {} 条记录", n));
                                 app.notification_timer = 60;

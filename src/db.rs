@@ -99,6 +99,7 @@ pub fn insert_imported_command(
 }
 
 /// Delete all rows matching (command, cwd). If cwd is None, matches rows with NULL cwd.
+#[allow(dead_code)]
 pub fn delete_command(conn: &Connection, command: &str, cwd: Option<&str>) -> rusqlite::Result<usize> {
     let count = match cwd {
         Some(c) => conn.execute(
@@ -110,6 +111,147 @@ pub fn delete_command(conn: &Connection, command: &str, cwd: Option<&str>) -> ru
             params![command],
         )?,
     };
+    Ok(count)
+}
+
+// ── Varint helpers (Protocol Buffers 7-bit encoding) ──
+
+fn varint_push(value: u64, buf: &mut Vec<u8>) {
+    let mut v = value;
+    while v >= 0x80 {
+        buf.push((v as u8 & 0x7f) | 0x80);
+        v >>= 7;
+    }
+    buf.push(v as u8);
+}
+
+fn varint_pop(data: &[u8], pos: &mut usize) -> Option<u64> {
+    let mut value: u64 = 0;
+    let mut shift = 0;
+    loop {
+        if *pos >= data.len() {
+            return None;
+        }
+        let byte = data[*pos];
+        *pos += 1;
+        value |= ((byte & 0x7f) as u64) << shift;
+        if byte & 0x80 == 0 {
+            return Some(value);
+        }
+        shift += 7;
+        if shift >= 64 {
+            return None;
+        }
+    }
+}
+
+// ── base64url helpers (RFC 4648 §5, no padding) ──
+
+const B64URL_ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+fn b64url_encode(data: &[u8]) -> String {
+    let mut out = String::with_capacity((data.len() * 4 + 2) / 3);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+
+        out.push(B64URL_ALPHABET[((triple >> 18) & 0x3f) as usize] as char);
+        out.push(B64URL_ALPHABET[((triple >> 12) & 0x3f) as usize] as char);
+        if chunk.len() >= 2 {
+            out.push(B64URL_ALPHABET[((triple >> 6) & 0x3f) as usize] as char);
+        }
+        if chunk.len() >= 3 {
+            out.push(B64URL_ALPHABET[(triple & 0x3f) as usize] as char);
+        }
+    }
+    out
+}
+
+fn b64url_decode(s: &str) -> Option<Vec<u8>> {
+    if !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return None;
+    }
+    let bytes: Vec<u8> = s.bytes().filter_map(|b| {
+        B64URL_ALPHABET.iter().position(|&x| x == b).map(|i| i as u8)
+    }).collect();
+    if bytes.len() != s.len() {
+        return None;
+    }
+
+    let mut out = Vec::with_capacity(bytes.len() * 3 / 4);
+    for chunk in bytes.chunks(4) {
+        let a = chunk[0] as u32;
+        let b = chunk.get(1).copied().unwrap_or(0) as u32;
+        let c = chunk.get(2).copied().unwrap_or(0) as u32;
+        let d = chunk.get(3).copied().unwrap_or(0) as u32;
+        let triple = (a << 18) | (b << 12) | (c << 6) | d;
+
+        out.push(((triple >> 16) & 0xff) as u8);
+        if chunk.len() >= 3 {
+            out.push(((triple >> 8) & 0xff) as u8);
+        }
+        if chunk.len() >= 4 {
+            out.push((triple & 0xff) as u8);
+        }
+    }
+    Some(out)
+}
+
+/// Encode a list of row IDs into a compact base64url string.
+/// Algorithm: sort → dedup → delta encode → varint → base64url.
+/// Fully reversible; no length limit.
+pub fn encode_ids(ids: &[i64]) -> String {
+    let mut sorted = ids.to_vec();
+    sorted.sort();
+    sorted.dedup();
+
+    // Delta encode: first = full, rest = difference
+    let mut buf = Vec::new();
+    let mut prev: i64 = 0;
+    for &id in &sorted {
+        let delta = id - prev;
+        prev = id;
+        // Zigzag encode signed delta to unsigned
+        let zigzag = ((delta << 1) ^ (delta >> 63)) as u64;
+        varint_push(zigzag, &mut buf);
+    }
+
+    b64url_encode(&buf)
+}
+
+/// Decode a base64url string back to a list of row IDs (reverse of encode_ids).
+pub fn decode_ids(s: &str) -> Option<Vec<i64>> {
+    let data = b64url_decode(s)?;
+    let mut ids = Vec::new();
+    let mut pos = 0;
+    let mut prev: i64 = 0;
+    while pos < data.len() {
+        let zigzag = varint_pop(&data, &mut pos)? as i64;
+        // Un-zigzag
+        let delta = (zigzag >> 1) ^ (-(zigzag & 1));
+        let id = prev + delta;
+        prev = id;
+        ids.push(id);
+    }
+    if ids.is_empty() {
+        None
+    } else {
+        Some(ids)
+    }
+}
+
+/// Delete rows by their primary key IDs.
+pub fn delete_by_ids(conn: &Connection, ids: &[i64]) -> rusqlite::Result<usize> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let placeholders: Vec<String> = ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+    let sql = format!("DELETE FROM commands WHERE id IN ({})", placeholders.join(","));
+    let mut stmt = conn.prepare(&sql)?;
+    let params: Vec<&dyn rusqlite::types::ToSql> = ids.iter().map(|id| id as &dyn rusqlite::types::ToSql).collect();
+    let count = stmt.execute(rusqlite::params_from_iter(params.iter()))?;
     Ok(count)
 }
 
@@ -141,6 +283,8 @@ pub struct HistoryEntry {
     pub cwd: Option<String>,
     pub created_at: Option<String>,
     pub freq: i64,
+    /// Database row IDs backing this collapsed entry
+    pub row_ids: Vec<i64>,
 }
 
 /// Query recent commands, with optional keyword filter and cwd prioritization.
@@ -226,7 +370,7 @@ pub fn query_collapsed(
     by_frequency: bool,
 ) -> rusqlite::Result<Vec<HistoryEntry>> {
     // Fetch all rows grouped by (command, cwd) and aggregate in Rust
-    let sql = "SELECT command, cwd, MAX(created_at) AS created_at, COUNT(*) AS freq
+    let sql = "SELECT command, cwd, MAX(created_at) AS created_at, COUNT(*) AS freq, GROUP_CONCAT(id) AS ids
          FROM commands
          GROUP BY command, cwd
          ORDER BY command";
@@ -238,20 +382,28 @@ pub fn query_collapsed(
             row.get::<_, Option<String>>(1)?,
             row.get::<_, Option<String>>(2)?,
             row.get::<_, i64>(3)?,
+            row.get::<_, Option<String>>(4)?,
         ))
     })?;
 
     let mut map: HashMap<String, HistoryEntry> = HashMap::new();
     for row in rows {
-        let (cmd, cwd, created_at, freq) = row?;
+        let (cmd, cwd, created_at, freq, ids_str) = row?;
+        let ids: Vec<i64> = ids_str
+            .as_deref()
+            .map(|s| s.split(',').filter_map(|n| n.parse().ok()).collect())
+            .unwrap_or_default();
+
         let entry = map.entry(cmd.clone()).or_insert_with(|| HistoryEntry {
             id: 0,
             command: cmd.clone(),
             cwd: None,
             created_at: None,
             freq: 0,
+            row_ids: Vec::new(),
         });
         entry.freq += freq;
+        entry.row_ids.extend(ids);
         // Prefer current directory's cwd and time if available
         if cwd.as_deref() == Some(current_cwd) {
             entry.cwd = cwd;
@@ -297,6 +449,7 @@ fn row_to_entry(row: &rusqlite::Row) -> rusqlite::Result<HistoryEntry> {
         cwd: row.get(2)?,
         created_at: row.get(3)?,
         freq: row.get(4)?,
+        row_ids: Vec::new(),
     })
 }
 
@@ -408,5 +561,44 @@ mod tests {
         assert!(!fuzzy_match("gsx", "git status"));
         assert!(fuzzy_match("", "anything"));
         assert!(fuzzy_match("TEST", "cargo test")); // case-insensitive
+    }
+
+    #[test]
+    fn test_encode_decode_single() {
+        let ids = vec![42];
+        let s = encode_ids(&ids);
+        let decoded = decode_ids(&s).unwrap();
+        assert_eq!(decoded, ids);
+    }
+
+    #[test]
+    fn test_encode_decode_multiple() {
+        let ids = vec![1042, 1043, 1045];
+        let s = encode_ids(&ids);
+        let decoded = decode_ids(&s).unwrap();
+        assert_eq!(decoded, ids);
+    }
+
+    #[test]
+    fn test_encode_decode_large_ids() {
+        let ids = vec![1, 50, 1000, 50000, 999999];
+        let s = encode_ids(&ids);
+        let decoded = decode_ids(&s).unwrap();
+        assert_eq!(decoded, ids);
+    }
+
+    #[test]
+    fn test_encode_decode_unsorted_input() {
+        let input = vec![1045, 1042, 1043]; // unsorted
+        let s = encode_ids(&input);
+        let decoded = decode_ids(&s).unwrap();
+        // encode_ids sorts+ddups internally
+        assert_eq!(decoded, vec![1042, 1043, 1045]);
+    }
+
+    #[test]
+    fn test_decode_invalid() {
+        assert!(decode_ids("!!!invalid!!!").is_none());
+        assert!(decode_ids("").is_none());
     }
 }

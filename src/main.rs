@@ -6,7 +6,7 @@ mod tui;
 
 use clap::Parser;
 use crate::cli::{Cli, Commands};
-use crate::db::query_collapsed;
+use crate::db::{delete_by_ids, encode_ids, query_collapsed};
 use crate::tui::{Action, first_line, relative_time_compact, shorten_cwd};
 use std::io::BufRead;
 use std::process;
@@ -32,11 +32,11 @@ fn main() {
         Some(Commands::Import { shell }) => {
             run_import(shell);
         }
-        Some(Commands::List { frequency, expand, limit, timestamp }) => {
-            run_list(&cli, *frequency, *expand, *timestamp, limit.unwrap_or(cli.limit as usize));
+        Some(Commands::List { frequency, expand, limit, timestamp, show_id }) => {
+            run_list(&cli, *frequency, *expand, *timestamp, *show_id, limit.unwrap_or(cli.limit as usize));
         }
-        Some(Commands::Delete { index, frequency, timestamp: _, expand: _, limit }) => {
-            run_delete(&cli, *index, *frequency, limit.unwrap_or(cli.limit as usize));
+        Some(Commands::Delete { id }) => {
+            run_delete(&cli, id);
         }
         None => {
             // Default: launch TUI
@@ -210,7 +210,7 @@ fn detect_shell() -> String {
 }
 
 /// Handle the `migu list` subcommand: print history to stdout.
-fn run_list(cli: &Cli, by_freq: bool, expand: bool, full_ts: bool, limit: usize) {
+fn run_list(cli: &Cli, by_freq: bool, expand: bool, full_ts: bool, show_id: bool, limit: usize) {
     let cfg = config::load();
     let path = cli
         .database
@@ -246,6 +246,7 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, full_ts: bool, limit: usize)
     // Build display columns and compute max widths
     struct Row {
         num: String,
+        id: String,
         time: String,
         freq: String,
         cwd: String,
@@ -256,6 +257,11 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, full_ts: bool, limit: usize)
 
     for (i, entry) in entries.iter().enumerate() {
         let num = (i + 1).to_string();
+        let id = if show_id {
+            encode_ids(&entry.row_ids)
+        } else {
+            String::new()
+        };
         let time = if full_ts {
             entry.created_at.as_deref().unwrap_or("").to_string()
         } else {
@@ -275,41 +281,52 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, full_ts: bool, limit: usize)
             first_line(&entry.command)
         };
 
-        rows.push(Row { num, time, freq, cwd: cwd_display, cmd });
+        rows.push(Row { num, id, time, freq, cwd: cwd_display, cmd });
     }
 
     let num_w = rows.iter().map(|r| r.num.len()).max().unwrap_or(2).max(3);
+    let id_w = if show_id { rows.iter().map(|r| r.id.len()).max().unwrap_or(0).max(2) } else { 0 };
     let time_w = rows.iter().map(|r| r.time.len()).max().unwrap_or(0).max(4);
     let freq_w = rows.iter().map(|r| r.freq.len()).max().unwrap_or(0).max(4);
     let cwd_w = rows.iter().map(|r| r.cwd.len()).max().unwrap_or(0).max(3);
 
     // Header
-    println!(
-        "{:<num_w$}  {:<time_w$}  {:<freq_w$}  {:<cwd_w$}  COMMAND",
-        "NO.",
-        "TIME",
-        "FREQ",
-        "CWD",
-    );
+    if show_id {
+        println!(
+            "{:<num_w$}  {:<id_w$}  {:<time_w$}  {:<freq_w$}  {:<cwd_w$}  COMMAND",
+            "NO.", "ID", "TIME", "FREQ", "CWD",
+        );
+    } else {
+        println!(
+            "{:<num_w$}  {:<time_w$}  {:<freq_w$}  {:<cwd_w$}  COMMAND",
+            "NO.", "TIME", "FREQ", "CWD",
+        );
+    }
 
     for row in &rows {
-        println!(
-            "{:<num_w$}  {:<time_w$}  {:<freq_w$}  {:<cwd_w$}  {}",
-            row.num,
-            row.time,
-            row.freq,
-            row.cwd,
-            row.cmd,
-        );
+        if show_id {
+            println!(
+                "{:<num_w$}  {}  {:<time_w$}  {:<freq_w$}  {:<cwd_w$}  {}",
+                row.num, row.id, row.time, row.freq, row.cwd, row.cmd,
+            );
+        } else {
+            println!(
+                "{:<num_w$}  {:<time_w$}  {:<freq_w$}  {:<cwd_w$}  {}",
+                row.num, row.time, row.freq, row.cwd, row.cmd,
+            );
+        }
     }
 }
 
-/// Handle the `migu delete` subcommand: delete by list index.
-fn run_delete(cli: &Cli, index: usize, by_freq: bool, limit: usize) {
-    if index == 0 {
-        eprintln!("migu: index must be >= 1");
-        process::exit(1);
-    }
+/// Handle the `migu delete` subcommand: delete by encoded ID.
+fn run_delete(cli: &Cli, id: &str) {
+    let ids = match db::decode_ids(id) {
+        Some(ids) => ids,
+        None => {
+            eprintln!("migu: invalid ID: {}", id);
+            process::exit(1);
+        }
+    };
 
     let cfg = config::load();
     let path = cli
@@ -326,30 +343,8 @@ fn run_delete(cli: &Cli, index: usize, by_freq: bool, limit: usize) {
         }
     };
 
-    let current_cwd = std::env::current_dir()
-        .ok()
-        .and_then(|p| p.to_str().map(|s| s.to_string()))
-        .unwrap_or_default();
-
-    // Use same collapsed view as list to find the entry
-    let entries = match query_collapsed(&conn, "", &current_cwd, limit.max(index), by_freq) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("migu: query error: {}", e);
-            process::exit(1);
-        }
-    };
-
-    let entry = match entries.get(index - 1) {
-        Some(e) => e,
-        None => {
-            eprintln!("migu: index {} out of range (found {} entries)", index, entries.len());
-            process::exit(1);
-        }
-    };
-
-    match db::delete_command(&conn, &entry.command, entry.cwd.as_deref()) {
-        Ok(n) => eprintln!("migu: deleted {} record(s) for '{}'", n, entry.command),
+    match delete_by_ids(&conn, &ids) {
+        Ok(n) => eprintln!("migu: deleted {} record(s)", n),
         Err(e) => {
             eprintln!("migu: delete failed: {}", e);
             process::exit(1);

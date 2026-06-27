@@ -73,29 +73,17 @@ pub enum Commands {
         #[arg(short = 't')]
         timestamp: bool,
 
+        /// Show encoded row IDs for use with migu delete
+        #[arg(short = 'i', long = "id")]
+        show_id: bool,
+
         /// Number of entries (overrides global --limit)
         #[arg(short = 'l')]
         limit: Option<usize>,
     },
-    /// Delete a command by its list index
+    /// Delete a command by its encoded ID (from migu list -i)
     Delete {
-        /// Index from migu list output (1-based)
-        index: usize,
-
-        /// Sort by frequency (match migu list -f)
-        #[arg(short = 'f')]
-        frequency: bool,
-
-        /// Show full ISO timestamp (display only, ignored)
-        #[arg(short = 't')]
-        timestamp: bool,
-
-        /// Expand (display only, ignored)
-        #[arg(short = 'z')]
-        expand: bool,
-
-        /// Number of entries (overrides global --limit)
-        #[arg(short = 'l')]
-        limit: Option<usize>,
+        /// Encoded ID from migu list -i output
+        id: String,
     },
 }
