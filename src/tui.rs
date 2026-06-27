@@ -726,7 +726,7 @@ pub(crate) fn first_line(cmd: &str) -> String {
     }
 }
 
-fn shorten_cwd(cwd: &str) -> String {
+pub(crate) fn shorten_cwd(cwd: &str) -> String {
     let home = dirs::home_dir()
         .and_then(|h| h.to_str().map(|s| s.to_string()))
         .unwrap_or_default();

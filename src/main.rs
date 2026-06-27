@@ -7,7 +7,7 @@ mod tui;
 use clap::Parser;
 use crate::cli::{Cli, Commands};
 use crate::db::query_collapsed;
-use crate::tui::{Action, first_line, relative_time_compact};
+use crate::tui::{Action, first_line, relative_time_compact, shorten_cwd};
 use std::io::BufRead;
 use std::process;
 
@@ -223,12 +223,12 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, limit: usize) {
         }
     };
 
-    let cwd = std::env::current_dir()
+    let current_cwd = std::env::current_dir()
         .ok()
         .and_then(|p| p.to_str().map(|s| s.to_string()))
         .unwrap_or_default();
 
-    let entries = match query_collapsed(&conn, "", &cwd, limit, by_freq) {
+    let entries = match query_collapsed(&conn, "", &current_cwd, limit, by_freq) {
         Ok(e) => e,
         Err(e) => {
             eprintln!("migu: query error: {}", e);
@@ -245,6 +245,7 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, limit: usize) {
         num: String,
         time: String,
         freq: String,
+        cwd: String,
         cmd: String,
     }
 
@@ -255,12 +256,17 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, limit: usize) {
         let time = entry
             .created_at
             .as_deref()
-            .map(|t| relative_time_compact(t))
+            .map(relative_time_compact)
             .unwrap_or_default();
         let freq = if entry.freq > 1 {
             format!("x{}", entry.freq)
         } else {
             String::new()
+        };
+        let cwd_display = match entry.cwd.as_deref() {
+            Some(c) if c == current_cwd => String::from("-"),
+            Some(c) => shorten_cwd(c),
+            None => String::new(),
         };
         let cmd = if expand {
             crate::tui::strip_ansi(&entry.command)
@@ -268,27 +274,30 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, limit: usize) {
             first_line(&entry.command)
         };
 
-        rows.push(Row { num, time, freq, cmd });
+        rows.push(Row { num, time, freq, cwd: cwd_display, cmd });
     }
 
     let num_w = rows.iter().map(|r| r.num.len()).max().unwrap_or(2).max(3);
     let time_w = rows.iter().map(|r| r.time.len()).max().unwrap_or(0).max(4);
     let freq_w = rows.iter().map(|r| r.freq.len()).max().unwrap_or(0).max(4);
+    let cwd_w = rows.iter().map(|r| r.cwd.len()).max().unwrap_or(0).max(3);
 
     // Header
     println!(
-        "{:<num_w$}  {:<time_w$}  {:<freq_w$}  COMMAND",
+        "{:<num_w$}  {:<time_w$}  {:<freq_w$}  {:<cwd_w$}  COMMAND",
         "NO.",
         "TIME",
         "FREQ",
+        "CWD",
     );
 
     for row in &rows {
         println!(
-            "{:<num_w$}  {:<time_w$}  {:<freq_w$}  {}",
+            "{:<num_w$}  {:<time_w$}  {:<freq_w$}  {:<cwd_w$}  {}",
             row.num,
             row.time,
             row.freq,
+            row.cwd,
             row.cmd,
         );
     }
