@@ -690,7 +690,7 @@ fn modifier_name(m: KeyModifiers) -> String {
 }
 
 /// Strip ANSI escape codes from a string to prevent terminal corruption.
-fn strip_ansi(s: &str) -> String {
+pub(crate) fn strip_ansi(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
@@ -711,7 +711,7 @@ fn strip_ansi(s: &str) -> String {
     result
 }
 
-fn first_line(cmd: &str) -> String {
+pub(crate) fn first_line(cmd: &str) -> String {
     let cmd = strip_ansi(cmd);
     let line = cmd.lines().next().unwrap_or("");
     let max_len = 80;
@@ -744,7 +744,7 @@ fn shorten_cwd(cwd: &str) -> String {
     }
 }
 
-fn relative_time(iso: &str) -> String {
+pub(crate) fn relative_time(iso: &str) -> String {
     let parsed = chrono::NaiveDateTime::parse_from_str(iso, "%Y-%m-%dT%H:%M:%S");
     let dt = match parsed {
         Ok(dt) => dt.and_utc(),
@@ -769,5 +769,34 @@ fn relative_time(iso: &str) -> String {
         format!("{}天前", secs / 86400)
     } else {
         format!("{}周前", secs / 604800)
+    }
+}
+
+/// Relative time in compact format for CLI output: "3s", "5m", "2h", "3d", "2w".
+pub(crate) fn relative_time_compact(iso: &str) -> String {
+    let parsed = chrono::NaiveDateTime::parse_from_str(iso, "%Y-%m-%dT%H:%M:%S");
+    let dt = match parsed {
+        Ok(dt) => dt.and_utc(),
+        Err(_) => return String::new(),
+    };
+
+    let now = chrono::Utc::now();
+    let duration = now.signed_duration_since(dt);
+
+    if duration.num_seconds() < 0 {
+        return "0s".to_string();
+    }
+
+    let secs = duration.num_seconds() as u64;
+    if secs < 60 {
+        format!("{}s", secs)
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h", secs / 3600)
+    } else if secs < 604800 {
+        format!("{}d", secs / 86400)
+    } else {
+        format!("{}w", secs / 604800)
     }
 }

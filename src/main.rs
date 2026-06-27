@@ -6,7 +6,8 @@ mod tui;
 
 use clap::Parser;
 use crate::cli::{Cli, Commands};
-use crate::tui::Action;
+use crate::db::query_collapsed;
+use crate::tui::{Action, first_line, relative_time_compact};
 use std::io::BufRead;
 use std::process;
 
@@ -30,6 +31,9 @@ fn main() {
         }
         Some(Commands::Import { shell }) => {
             run_import(shell);
+        }
+        Some(Commands::List { frequency, expand, limit }) => {
+            run_list(&cli, *frequency, *expand, limit.unwrap_or(cli.limit as usize));
         }
         None => {
             // Default: launch TUI
@@ -200,6 +204,96 @@ fn detect_shell() -> String {
                 .map(|n| n.to_string())
         })
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// Handle the `migu list` subcommand: print history to stdout.
+fn run_list(cli: &Cli, by_freq: bool, expand: bool, limit: usize) {
+    let cfg = config::load();
+    let path = cli
+        .database
+        .as_ref()
+        .map(|p| p.into())
+        .or_else(|| cfg.database.path.as_ref().map(|p| p.into()))
+        .unwrap_or_else(db::db_path);
+    let conn = match db::open(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("migu: failed to open database: {}", e);
+            process::exit(1);
+        }
+    };
+
+    let cwd = std::env::current_dir()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_default();
+
+    let entries = match query_collapsed(&conn, "", &cwd, limit, by_freq) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("migu: query error: {}", e);
+            process::exit(1);
+        }
+    };
+
+    if entries.is_empty() {
+        return;
+    }
+
+    // Build display columns and compute max widths
+    struct Row {
+        num: String,
+        time: String,
+        freq: String,
+        cmd: String,
+    }
+
+    let mut rows: Vec<Row> = Vec::with_capacity(entries.len());
+
+    let idx_w = if entries.len() >= 100 { 3 } else if entries.len() >= 10 { 2 } else { 1 };
+
+    for (i, entry) in entries.iter().enumerate() {
+        let num = format!("{:>width$}", i + 1, width = idx_w);
+        let time = entry
+            .created_at
+            .as_deref()
+            .map(|t| format!("[{}]", relative_time_compact(t)))
+            .unwrap_or_default();
+        let freq = if entry.freq > 1 {
+            format!("(x{})", entry.freq)
+        } else {
+            String::new()
+        };
+        let cmd = if expand {
+            crate::tui::strip_ansi(&entry.command)
+        } else {
+            first_line(&entry.command)
+        };
+
+        rows.push(Row { num, time, freq, cmd });
+    }
+
+    let num_w = rows.iter().map(|r| r.num.len()).max().unwrap_or(2).max(3);
+    let time_w = rows.iter().map(|r| r.time.len()).max().unwrap_or(0).max(4);
+    let freq_w = rows.iter().map(|r| r.freq.len()).max().unwrap_or(0).max(4);
+
+    // Header
+    println!(
+        "{:>num_w$}  {:<time_w$}  {:<freq_w$}  COMMAND",
+        "NO.",
+        "TIME",
+        "FREQ",
+    );
+
+    for row in &rows {
+        println!(
+            "{:>num_w$}  {:<time_w$}  {:<freq_w$}  {}",
+            row.num,
+            row.time,
+            row.freq,
+            row.cmd,
+        );
+    }
 }
 
 /// Handle the `re add` subcommand.

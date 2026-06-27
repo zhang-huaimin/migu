@@ -59,4 +59,18 @@ pub enum Commands {
         #[arg(value_parser = ["bash", "zsh", "fish"])]
         shell: String,
     },
+    /// List command history to stdout
+    List {
+        /// Sort by frequency instead of time
+        #[arg(short = 'f')]
+        frequency: bool,
+
+        /// Expand: show full command
+        #[arg(short = 'z')]
+        expand: bool,
+
+        /// Number of entries (overrides global --limit)
+        #[arg(short = 'l')]
+        limit: Option<usize>,
+    },
 }

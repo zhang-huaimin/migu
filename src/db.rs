@@ -250,19 +250,19 @@ pub fn query_collapsed(
 
     let mut entries: Vec<HistoryEntry> = map.into_values().collect();
 
-    // Sort: current cwd first, then by freq or time depending on mode
+    // Sort: by freq or time depending on mode, with cwd priority as tiebreaker
     entries.sort_by(|a, b| {
         let a_prio = if a.cwd.as_deref() == Some(current_cwd) { 0 } else { 1 };
         let b_prio = if b.cwd.as_deref() == Some(current_cwd) { 0 } else { 1 };
-        let ord = a_prio.cmp(&b_prio);
-        if ord != std::cmp::Ordering::Equal {
-            return ord;
-        }
         if by_frequency {
-            b.freq.cmp(&a.freq)
+            // Frequency mode: current cwd first, then freq, then time
+            a_prio.cmp(&b_prio)
+                .then(b.freq.cmp(&a.freq))
                 .then(b.created_at.cmp(&a.created_at))
         } else {
+            // Time mode: time first, then current cwd, then freq
             b.created_at.cmp(&a.created_at)
+                .then(a_prio.cmp(&b_prio))
                 .then(b.freq.cmp(&a.freq))
         }
     });
