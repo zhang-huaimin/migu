@@ -257,10 +257,10 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, limit: usize) {
         let time = entry
             .created_at
             .as_deref()
-            .map(|t| format!("[{}]", relative_time_compact(t)))
+            .map(|t| relative_time_compact(t))
             .unwrap_or_default();
         let freq = if entry.freq > 1 {
-            format!("(x{})", entry.freq)
+            format!("x{}", entry.freq)
         } else {
             String::new()
         };
