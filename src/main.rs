@@ -250,10 +250,8 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, limit: usize) {
 
     let mut rows: Vec<Row> = Vec::with_capacity(entries.len());
 
-    let idx_w = if entries.len() >= 100 { 3 } else if entries.len() >= 10 { 2 } else { 1 };
-
     for (i, entry) in entries.iter().enumerate() {
-        let num = format!("{:>width$}", i + 1, width = idx_w);
+        let num = (i + 1).to_string();
         let time = entry
             .created_at
             .as_deref()
