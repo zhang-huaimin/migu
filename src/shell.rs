@@ -17,7 +17,7 @@ const BASH_INIT: &str = r###"
 _migu_prompt_command() {
     local cmd
     cmd="$(history 1 | sed 's/^ *[0-9][0-9]* *[0-9]\{4\}-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9] *//' | sed 's/^ *[0-9][0-9]* *//')"
-    migu add -- "$cmd"
+    migu add --cwd "$PWD" -- "$cmd"
 }
 PROMPT_COMMAND=_migu_prompt_command
 
@@ -75,7 +75,7 @@ _migu_add_hook() {
     # recursion guard: preexec fires for migu add itself
     [[ -n "$_migu_skip" ]] && return
     _migu_skip=1
-    migu add -- "$1"
+    migu add --cwd "$PWD" -- "$1"
     unset _migu_skip
 }
 add-zsh-hook preexec _migu_add_hook
@@ -118,7 +118,7 @@ function _migu_add --on-event fish_preexec
         return
     end
     set -g _migu_skip 1
-    migu add -- "$argv"
+    migu add --cwd "$PWD" -- "$argv"
     set -e _migu_skip
 end
 

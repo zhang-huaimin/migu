@@ -263,6 +263,7 @@ pub fn query_collapsed(
                 .then(b.created_at.cmp(&a.created_at))
         } else {
             b.created_at.cmp(&a.created_at)
+                .then(b.freq.cmp(&a.freq))
         }
     });
 
