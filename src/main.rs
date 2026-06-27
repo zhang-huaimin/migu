@@ -292,7 +292,7 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, full_ts: bool, show_id: bool
     // Header
     if show_id {
         println!(
-            "{:<num_w$}  {:<time_w$}  {:<freq_w$}  {:<cwd_w$}  COMMAND  ID",
+            "{:<num_w$}  {:<time_w$}  {:<freq_w$}  {:<cwd_w$}  COMMAND  |  ID",
             "NO.", "TIME", "FREQ", "CWD",
         );
     } else {
@@ -305,7 +305,7 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, full_ts: bool, show_id: bool
     for row in &rows {
         if show_id {
             println!(
-                "{:<num_w$}  {:<time_w$}  {:<freq_w$}  {:<cwd_w$}  {}  {}",
+                "{:<num_w$}  {:<time_w$}  {:<freq_w$}  {:<cwd_w$}  {}  |  {}",
                 row.num, row.time, row.freq, row.cwd, row.cmd, row.id,
             );
         } else {
