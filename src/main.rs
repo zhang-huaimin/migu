@@ -35,8 +35,8 @@ fn main() {
         Some(Commands::List { frequency, expand, limit, timestamp }) => {
             run_list(&cli, *frequency, *expand, *timestamp, limit.unwrap_or(cli.limit as usize));
         }
-        Some(Commands::Delete { index, frequency }) => {
-            run_delete(&cli, *index, *frequency);
+        Some(Commands::Delete { index, frequency, timestamp: _, expand: _, limit }) => {
+            run_delete(&cli, *index, *frequency, limit.unwrap_or(cli.limit as usize));
         }
         None => {
             // Default: launch TUI
@@ -305,7 +305,7 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, full_ts: bool, limit: usize)
 }
 
 /// Handle the `migu delete` subcommand: delete by list index.
-fn run_delete(cli: &Cli, index: usize, by_freq: bool) {
+fn run_delete(cli: &Cli, index: usize, by_freq: bool, limit: usize) {
     if index == 0 {
         eprintln!("migu: index must be >= 1");
         process::exit(1);
@@ -332,7 +332,7 @@ fn run_delete(cli: &Cli, index: usize, by_freq: bool) {
         .unwrap_or_default();
 
     // Use same collapsed view as list to find the entry
-    let entries = match query_collapsed(&conn, "", &current_cwd, index, by_freq) {
+    let entries = match query_collapsed(&conn, "", &current_cwd, limit.max(index), by_freq) {
         Ok(e) => e,
         Err(e) => {
             eprintln!("migu: query error: {}", e);

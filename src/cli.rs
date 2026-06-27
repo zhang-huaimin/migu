@@ -82,8 +82,20 @@ pub enum Commands {
         /// Index from migu list output (1-based)
         index: usize,
 
-        /// Use frequency order to match index (same as list -f)
+        /// Sort by frequency (match migu list -f)
         #[arg(short = 'f')]
         frequency: bool,
+
+        /// Show full ISO timestamp (display only, ignored)
+        #[arg(short = 't')]
+        timestamp: bool,
+
+        /// Expand (display only, ignored)
+        #[arg(short = 'z')]
+        expand: bool,
+
+        /// Number of entries (overrides global --limit)
+        #[arg(short = 'l')]
+        limit: Option<usize>,
     },
 }
