@@ -58,8 +58,8 @@ Press **Ctrl-R** to open the TUI browser:
 | Key | Action |
 |-----|--------|
 | `↑` `↓` | Navigate |
-| **Enter** | Execute selected command |
-| **Tab** | Insert command into prompt (editable) |
+| **Enter** | Execute selected command (auto-runs in your shell) |
+| **Tab** | Insert command into prompt for editing |
 | `Alt + s` | Toggle Time / Frequency mode |
 | `Alt + n` | Enter number-input mode, digits + Enter to jump |
 | `Alt + l` | Change display limit |
@@ -96,70 +96,15 @@ migu --no-dedup   # don't fold consecutive duplicates
 
 ### Bash
 
-```bash
-# Auto-record
-_migu_prompt_command() {
-    local cmd
-    cmd="$(history 1 | sed 's/^ *[0-9][0-9]* *//')"
-    migu add -- "$cmd"
-}
-PROMPT_COMMAND=_migu_prompt_command
-
-# Ctrl-R binding
-_migu_widget() {
-    MIGU_WIDGET=1 command migu
-    local cmd
-    cmd="$(cat /tmp/migu-cmd 2>/dev/null)"
-    rm -f /tmp/migu-cmd
-    READLINE_LINE="${cmd:-$READLINE_LINE}"
-    READLINE_POINT=${#READLINE_LINE}
-}
-bind -x '"\C-r": _migu_widget' 2>/dev/null
-```
+Bash uses a two-keystroke macro (like mcfly) for auto-execute: `Ctrl-R` → `\C-x1\C-x2`. The widget binds `\C-x2` to `accept-line` for Enter, or nothing for Tab.
 
 ### Zsh
 
-```zsh
-autoload -Uz add-zsh-hook
-_migu_add_hook() {
-    [[ -n "$_migu_skip" ]] && return
-    _migu_skip=1
-    migu add -- "$1"
-    unset _migu_skip
-}
-add-zsh-hook preexec _migu_add_hook
-
-_migu_widget() {
-    MIGU_WIDGET=1 command migu
-    local cmd="$(cat /tmp/migu-cmd 2>/dev/null)"
-    rm -f /tmp/migu-cmd
-    zle reset-prompt
-    LBUFFER+="$cmd"
-}
-zle -N _migu_widget
-bindkey '^R' _migu_widget
-```
+Uses `zle accept-line` for auto-execute.
 
 ### Fish
 
-```fish
-function _migu_add --on-event fish_preexec
-    if set -q _migu_skip
-        return
-    end
-    set -g _migu_skip 1
-    migu add -- "$argv"
-    set -e _migu_skip
-end
-
-function _migu_widget
-    MIGU_WIDGET=1 command migu
-    set -l cmd (cat /tmp/migu-cmd 2>/dev/null)
-    rm -f /tmp/migu-cmd
-    commandline -r -- $cmd
-end
-bind \cr _migu_widget
-```
+Uses `commandline -f execute` for auto-execute.
 
 ## Configuration
 
@@ -182,6 +127,9 @@ set_limit = "${leader} + l"         # inherit leader
 [database]
 # Custom database path (default: ~/.migu/history.db)
 path = "/mnt/data/migu/history.db"
+# Max entries to keep; older ones are purged probabilistically (default: no limit).
+# Env var MIGU_MAX_ENTRIES takes precedence over this setting.
+max_entries = 500000
 ```
 
 ## Database

@@ -59,8 +59,13 @@ fn default_set_limit() -> String {
 
 #[derive(Debug, Default, Deserialize)]
 pub struct DatabaseConfig {
+    /// Custom database file path (default: ~/.migu/history.db)
     #[serde(default)]
     pub path: Option<String>,
+    /// Max entries to keep; older ones are purged probabilistically.
+    /// If not set, no limit. Env var MIGU_MAX_ENTRIES takes precedence.
+    #[serde(default)]
+    pub max_entries: Option<i64>,
 }
 
 /// Resolve a binding string like "Ctrl + l" or "${leader} + s" into (KeyModifiers, char).

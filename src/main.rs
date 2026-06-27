@@ -240,12 +240,14 @@ fn run_add(
         eprintln!("re: failed to insert command: {}", e);
     }
 
-    // Probabilistic purge
+    // Probabilistic purge: env var takes precedence over config; no limit by default
     let max_entries = std::env::var("MIGU_MAX_ENTRIES")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(100_000);
-    let _ = db::maybe_purge(&conn, max_entries);
+        .or(cfg.database.max_entries);
+    if let Some(max) = max_entries {
+        let _ = db::maybe_purge(&conn, max);
+    }
 }
 
 /// Launch the interactive TUI.
