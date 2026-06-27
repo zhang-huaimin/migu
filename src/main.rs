@@ -379,6 +379,7 @@ fn run_tui(cli: &Cli) {
         toggle_numbers: config::resolve_binding(&ks.toggle_numbers, leader),
         toggle_help: config::resolve_binding(&ks.toggle_help, leader),
         set_limit: config::resolve_binding(&ks.set_limit, leader),
+        toggle_timestamp: config::resolve_binding(&ks.toggle_timestamp, leader),
     };
 
     match tui::run(&conn, &cwd, cli.limit as usize, &keys) {

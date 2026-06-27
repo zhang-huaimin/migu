@@ -27,6 +27,9 @@ pub struct KeyConfig {
     /// Set display limit binding
     #[serde(default = "default_set_limit")]
     pub set_limit: String,
+    /// Toggle full timestamp display binding
+    #[serde(default = "default_toggle_timestamp")]
+    pub toggle_timestamp: String,
 }
 
 impl Default for KeyConfig {
@@ -37,6 +40,7 @@ impl Default for KeyConfig {
             toggle_numbers: default_toggle_numbers(),
             toggle_help: default_toggle_help(),
             set_limit: default_set_limit(),
+            toggle_timestamp: default_toggle_timestamp(),
         }
     }
 }
@@ -55,6 +59,9 @@ fn default_toggle_help() -> String {
 }
 fn default_set_limit() -> String {
     "${leader} + l".to_string()
+}
+fn default_toggle_timestamp() -> String {
+    "${leader} + t".to_string()
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -104,6 +111,7 @@ pub struct ResolvedKeys {
     pub toggle_numbers: (crossterm::event::KeyModifiers, char),
     pub toggle_help: (crossterm::event::KeyModifiers, char),
     pub set_limit: (crossterm::event::KeyModifiers, char),
+    pub toggle_timestamp: (crossterm::event::KeyModifiers, char),
 }
 
 /// Load config from ~/.migu/config.toml, falling back to defaults.

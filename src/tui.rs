@@ -62,6 +62,10 @@ pub struct App {
     pub key_set_limit: char,
     /// Whether the selected entry is expanded to show full command
     pub expanded: bool,
+    /// Show full ISO timestamp instead of relative time
+    pub show_timestamp: bool,
+    pub mod_toggle_timestamp: KeyModifiers,
+    pub key_toggle_timestamp: char,
 }
 
 impl App {
@@ -94,6 +98,9 @@ impl App {
             mod_set_limit: keys.set_limit.0,
             key_set_limit: keys.set_limit.1,
             expanded: false,
+            show_timestamp: false,
+            mod_toggle_timestamp: keys.toggle_timestamp.0,
+            key_toggle_timestamp: keys.toggle_timestamp.1,
         }
     }
 
@@ -287,6 +294,10 @@ fn run_loop(
                 // Alt+Z: toggle expand mode
                 KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::ALT) => {
                     app.expanded = !app.expanded;
+                }
+                // Alt+T: toggle full timestamp display
+                KeyCode::Char(_) if is_mod_key(&key, app.mod_toggle_timestamp, app.key_toggle_timestamp) => {
+                    app.show_timestamp = !app.show_timestamp;
                 }
                 KeyCode::Char(c) if app.limit_mode && c.is_ascii_digit() => {
                     app.limit_input.push(c);
@@ -543,7 +554,11 @@ fn render_list(f: &mut Frame, area: Rect, app: &mut App) {
                 .filter(|c| *c != app.cwd)
                 .map(shorten_cwd)
                 .unwrap_or_default();
-            let time_display = entry.created_at.as_deref().map(relative_time).unwrap_or_default();
+            let time_display = if app.show_timestamp {
+                entry.created_at.as_deref().unwrap_or("").to_string()
+            } else {
+                entry.created_at.as_deref().map(relative_time).unwrap_or_default()
+            };
 
             let freq_badge = if entry.freq > 1 {
                 format!(" (x{})", entry.freq)
@@ -643,6 +658,7 @@ fn render_help(f: &mut Frame, area: Rect, app: &App) {
         (mk(app.mod_set_limit, app.key_set_limit), "设置显示条数"),
         ("Esc".to_string(), "退出（跳转模式中取消）"),
         ("Alt + z".to_string(), "展开 / 折叠选中命令"),
+        (mk(app.mod_toggle_timestamp, app.key_toggle_timestamp), "切换相对 / 完整时间戳"),
         ("Ctrl + C".to_string(), "强制退出"),
         ("↑ ↓ PgUp PgDn".to_string(), "上下导航 / 翻页"),
         ("← → Home End".to_string(), "搜索框内移动光标"),
