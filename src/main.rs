@@ -8,7 +8,7 @@ use clap::Parser;
 use crate::cli::{Cli, Commands};
 use crate::tui::Action;
 use std::io::BufRead;
-use std::process::{self, Command};
+use std::process;
 
 fn main() {
     let cli = Cli::parse();
@@ -202,25 +202,6 @@ fn detect_shell() -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-/// Build a shell-style prompt from user, hostname, and cwd.
-fn shell_prompt(cwd: &str) -> String {
-    let user = whoami::username();
-    let host = whoami::fallible::hostname().unwrap_or_else(|_| "host".to_string());
-    let home = dirs::home_dir()
-        .and_then(|h| h.to_str().map(|s| s.to_string()))
-        .unwrap_or_default();
-    let dir = if !home.is_empty() && cwd.starts_with(&home) {
-        format!("~{}", &cwd[home.len()..])
-    } else {
-        cwd.to_string()
-    };
-    // Green user@host, blue directory, white $
-    format!(
-        "\x1b[1;32m{}@{}\x1b[0m:\x1b[1;34m{}\x1b[0m$",
-        user, host, dir
-    )
-}
-
 /// Handle the `re add` subcommand.
 fn run_add(
     command: &[String],
@@ -310,40 +291,20 @@ fn run_tui(cli: &Cli) {
             }
         }
         Ok(Action::Execute(cmd)) => {
-            // Echo the command with a shell-style prompt
-            let prompt = shell_prompt(&cwd);
-            eprintln!("{} {}", prompt, cmd);
-
-            // In widget mode, pass command back so the shell can record it
+            // Widget mode: write both signal files
             if std::env::var("MIGU_WIDGET").is_ok() {
                 let _ = std::fs::write("/tmp/migu-cmd", &cmd);
                 let _ = std::fs::write("/tmp/migu-exec", "");
+            } else {
+                // Direct mode: print to stdout
+                println!("{}", cmd);
             }
 
-            // Record the executed command in the database
+            // Record the command in the database
             if let Ok(conn) = db::open(&path) {
                 let host = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
                 let sh = detect_shell();
                 let _ = db::insert_command(&conn, &cmd, &host, &sh, Some(&cwd), None, None);
-            }
-
-            // Use user's shell in interactive mode so aliases (like ls --color=auto) work
-            let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
-            let status = Command::new(&shell)
-                .arg("-i")
-                .arg("-c")
-                .arg(&cmd)
-                .spawn()
-                .and_then(|mut child| child.wait());
-            match status {
-                Ok(s) if !s.success() => {
-                    std::process::exit(s.code().unwrap_or(1));
-                }
-                Err(e) => {
-                    eprintln!("re: failed to execute command: {}", e);
-                    process::exit(1);
-                }
-                _ => {}
             }
         }
         Ok(Action::Quit) => {

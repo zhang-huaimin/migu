@@ -21,26 +21,44 @@ _migu_prompt_command() {
 }
 PROMPT_COMMAND=_migu_prompt_command
 
-# Ctrl-R widget: invokes the migu TUI and inserts result into command line
+# Ctrl-R widget: two-keystroke macro (like mcfly).
+#   Ctrl-R → MIGU_SEARCH_KEY + MIGU_ACCEPT_KEY.
+#   MIGU_SEARCH_KEY runs _migu_widget via bind -x.
+#   MIGU_ACCEPT_KEY is dynamically bound to accept-line (Enter) or nothing (Tab/cancel).
+MIGU_SEARCH_KEY="${MIGU_SEARCH_KEY:-\C-x1}"
+MIGU_ACCEPT_KEY="${MIGU_ACCEPT_KEY:-\C-x2}"
+
 _migu_widget() {
     MIGU_WIDGET=1 command migu
     local cmd
     cmd="$(cat /tmp/migu-cmd 2>/dev/null)"
     if [ -n "$cmd" ]; then
         if [ -f /tmp/migu-exec ]; then
-            rm -f /tmp/migu-exec
-            rm -f /tmp/migu-cmd
-            # Append to history file so up-arrow can recall it
-            echo "$cmd" >> ~/.bash_history
-            history -n
+            # Enter: insert + auto-execute
+            rm -f /tmp/migu-exec /tmp/migu-cmd
+            READLINE_LINE="$cmd"
+            READLINE_POINT=${#READLINE_LINE}
+            bind -m emacs     "\"${MIGU_ACCEPT_KEY}\":accept-line"
+            bind -m vi-insert "\"${MIGU_ACCEPT_KEY}\":accept-line"
         else
+            # Tab: insert only (editable)
             rm -f /tmp/migu-cmd
             READLINE_LINE="$cmd"
             READLINE_POINT=${#READLINE_LINE}
+            bind -m emacs     "\"${MIGU_ACCEPT_KEY}\":\"\""
+            bind -m vi-insert "\"${MIGU_ACCEPT_KEY}\":\"\""
         fi
+    else
+        # Cancelled: ensure accept key does nothing
+        bind -m emacs     "\"${MIGU_ACCEPT_KEY}\":\"\""
+        bind -m vi-insert "\"${MIGU_ACCEPT_KEY}\":\"\""
     fi
 }
-bind -x '"\C-r": _migu_widget' 2>/dev/null
+
+bind -m emacs     -x "\"${MIGU_SEARCH_KEY}\":_migu_widget" 2>/dev/null
+bind -m vi-insert -x "\"${MIGU_SEARCH_KEY}\":_migu_widget" 2>/dev/null
+bind -m emacs     "\"\C-r\":\"${MIGU_SEARCH_KEY}${MIGU_ACCEPT_KEY}\""
+bind -m vi-insert "\"\C-r\":\"${MIGU_SEARCH_KEY}${MIGU_ACCEPT_KEY}\""
 
 # Import existing history on first setup (runs in background)
 (migu import bash 2>/dev/null &)
@@ -68,10 +86,14 @@ _migu_widget() {
     local cmd="$(cat /tmp/migu-cmd 2>/dev/null)"
     if [ -n "$cmd" ]; then
         if [ -f /tmp/migu-exec ]; then
+            # Enter: insert + auto-execute
             rm -f /tmp/migu-exec
             rm -f /tmp/migu-cmd
-            print -s -- "$cmd"
+            zle reset-prompt
+            LBUFFER+="$cmd"
+            zle accept-line
         else
+            # Tab: insert only (editable)
             rm -f /tmp/migu-cmd
             zle reset-prompt
             LBUFFER+="$cmd"
@@ -106,10 +128,13 @@ function _migu_widget
     set -l cmd (cat /tmp/migu-cmd 2>/dev/null)
     if test -n "$cmd"
         if test -f /tmp/migu-exec
+            # Enter: insert + auto-execute
             rm -f /tmp/migu-exec
             rm -f /tmp/migu-cmd
-            builtin history add -- "$cmd"
+            commandline -r -- $cmd
+            commandline -f execute
         else
+            # Tab: insert only (editable)
             rm -f /tmp/migu-cmd
             commandline -r -- $cmd
         end

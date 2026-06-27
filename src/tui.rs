@@ -20,9 +20,9 @@ use crate::db::{HistoryEntry, query_collapsed};
 /// Action the user took in the TUI.
 #[derive(Debug, Clone)]
 pub enum Action {
-    /// Tab: output command to stdout for shell widget to insert
+    /// Tab: insert command into shell prompt for editing
     Insert(String),
-    /// Enter: directly execute the command
+    /// Enter: insert command and signal shell to auto-execute
     Execute(String),
     /// Esc / Ctrl-C: quit without action
     Quit,
@@ -165,8 +165,7 @@ impl App {
         self.number_buf.clear();
         true
     }
-
-    /// Enter: select current entry for execution.
+    /// Enter: select current entry and signal the shell to auto-execute.
     pub fn select_execute(&mut self) {
         if let Some(entry) = self.entries.get(self.selected) {
             self.action = Some(Action::Execute(entry.command.clone()));
@@ -174,7 +173,7 @@ impl App {
         }
     }
 
-    /// Tab: select current entry for insertion (print to stdout).
+    /// Tab: select current entry for insertion into the shell prompt (no auto-execute).
     pub fn select_insert(&mut self) {
         if let Some(entry) = self.entries.get(self.selected) {
             self.action = Some(Action::Insert(entry.command.clone()));
