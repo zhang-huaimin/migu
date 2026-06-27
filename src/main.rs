@@ -285,6 +285,7 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, full_ts: bool, show_id: bool
     }
 
     let num_w = rows.iter().map(|r| r.num.len()).max().unwrap_or(2).max(3);
+    let id_w = if show_id { rows.iter().map(|r| r.id.len()).max().unwrap_or(0).max(2) } else { 0 };
     let time_w = rows.iter().map(|r| r.time.len()).max().unwrap_or(0).max(4);
     let freq_w = rows.iter().map(|r| r.freq.len()).max().unwrap_or(0).max(4);
     let cwd_w = rows.iter().map(|r| r.cwd.len()).max().unwrap_or(0).max(3);
@@ -292,8 +293,8 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, full_ts: bool, show_id: bool
     // Header
     if show_id {
         println!(
-            "{:<num_w$}  {:<time_w$}  {:<freq_w$}  {:<cwd_w$}  COMMAND  |  ID",
-            "NO.", "TIME", "FREQ", "CWD",
+            "{:<num_w$}  {:<id_w$}  {:<time_w$}  {:<freq_w$}  {:<cwd_w$}  COMMAND",
+            "NO.", "ID", "TIME", "FREQ", "CWD",
         );
     } else {
         println!(
@@ -305,8 +306,8 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, full_ts: bool, show_id: bool
     for row in &rows {
         if show_id {
             println!(
-                "{:<num_w$}  {:<time_w$}  {:<freq_w$}  {:<cwd_w$}  {}  |  {}",
-                row.num, row.time, row.freq, row.cwd, row.cmd, row.id,
+                "{:<num_w$}  {:<id_w$}  {:<time_w$}  {:<freq_w$}  {:<cwd_w$}  {}",
+                row.num, row.id, row.time, row.freq, row.cwd, row.cmd,
             );
         } else {
             println!(
