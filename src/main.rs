@@ -279,7 +279,7 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, limit: usize) {
 
     // Header
     println!(
-        "{:>num_w$}  {:<time_w$}  {:<freq_w$}  COMMAND",
+        "{:<num_w$}  {:<time_w$}  {:<freq_w$}  COMMAND",
         "NO.",
         "TIME",
         "FREQ",
@@ -287,7 +287,7 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, limit: usize) {
 
     for row in &rows {
         println!(
-            "{:>num_w$}  {:<time_w$}  {:<freq_w$}  {}",
+            "{:<num_w$}  {:<time_w$}  {:<freq_w$}  {}",
             row.num,
             row.time,
             row.freq,
