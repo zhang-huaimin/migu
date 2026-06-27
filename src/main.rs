@@ -35,6 +35,9 @@ fn main() {
         Some(Commands::List { frequency, expand, limit, timestamp }) => {
             run_list(&cli, *frequency, *expand, *timestamp, limit.unwrap_or(cli.limit as usize));
         }
+        Some(Commands::Delete { index, frequency }) => {
+            run_delete(&cli, *index, *frequency);
+        }
         None => {
             // Default: launch TUI
             run_tui(&cli);
@@ -298,6 +301,59 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, full_ts: bool, limit: usize)
             row.cwd,
             row.cmd,
         );
+    }
+}
+
+/// Handle the `migu delete` subcommand: delete by list index.
+fn run_delete(cli: &Cli, index: usize, by_freq: bool) {
+    if index == 0 {
+        eprintln!("migu: index must be >= 1");
+        process::exit(1);
+    }
+
+    let cfg = config::load();
+    let path = cli
+        .database
+        .as_ref()
+        .map(|p| p.into())
+        .or_else(|| cfg.database.path.as_ref().map(|p| p.into()))
+        .unwrap_or_else(db::db_path);
+    let conn = match db::open(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("migu: failed to open database: {}", e);
+            process::exit(1);
+        }
+    };
+
+    let current_cwd = std::env::current_dir()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_default();
+
+    // Use same collapsed view as list to find the entry
+    let entries = match query_collapsed(&conn, "", &current_cwd, index, by_freq) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("migu: query error: {}", e);
+            process::exit(1);
+        }
+    };
+
+    let entry = match entries.get(index - 1) {
+        Some(e) => e,
+        None => {
+            eprintln!("migu: index {} out of range (found {} entries)", index, entries.len());
+            process::exit(1);
+        }
+    };
+
+    match db::delete_command(&conn, &entry.command, entry.cwd.as_deref()) {
+        Ok(n) => eprintln!("migu: deleted {} record(s) for '{}'", n, entry.command),
+        Err(e) => {
+            eprintln!("migu: delete failed: {}", e);
+            process::exit(1);
+        }
     }
 }
 

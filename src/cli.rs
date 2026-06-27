@@ -77,4 +77,13 @@ pub enum Commands {
         #[arg(short = 'l')]
         limit: Option<usize>,
     },
+    /// Delete a command by its list index
+    Delete {
+        /// Index from migu list output (1-based)
+        index: usize,
+
+        /// Use frequency order to match index (same as list -f)
+        #[arg(short = 'f')]
+        frequency: bool,
+    },
 }
