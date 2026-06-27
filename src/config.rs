@@ -8,6 +8,10 @@ pub struct Config {
     pub keys: KeyConfig,
     #[serde(default)]
     pub database: DatabaseConfig,
+    /// Require confirmation before deleting a command (default: true).
+    /// Set MIGU_NO_CONFIRM=1 to skip confirmation.
+    #[serde(default = "default_confirm_delete")]
+    pub confirm_delete: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -62,6 +66,9 @@ fn default_set_limit() -> String {
 }
 fn default_toggle_timestamp() -> String {
     "${leader} + t".to_string()
+}
+fn default_confirm_delete() -> bool {
+    true
 }
 
 #[derive(Debug, Default, Deserialize)]

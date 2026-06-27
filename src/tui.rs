@@ -15,7 +15,7 @@ use std::io;
 use std::time::Duration;
 
 use crate::config::ResolvedKeys;
-use crate::db::{HistoryEntry, query_collapsed};
+use crate::db::{HistoryEntry, delete_command, query_collapsed};
 
 /// Action the user took in the TUI.
 #[derive(Debug, Clone)]
@@ -66,10 +66,14 @@ pub struct App {
     pub show_timestamp: bool,
     pub mod_toggle_timestamp: KeyModifiers,
     pub key_toggle_timestamp: char,
+    /// Whether to confirm before deleting (from config/env)
+    pub confirm_delete: bool,
+    /// If set, waiting for y/n to confirm deletion of this entry index
+    pub delete_confirm: Option<usize>,
 }
 
 impl App {
-    pub fn new(cwd: String, limit: usize, keys: &ResolvedKeys) -> Self {
+    pub fn new(cwd: String, limit: usize, keys: &ResolvedKeys, confirm_delete: bool) -> Self {
         Self {
             frequent_mode: false,
             keyword: String::new(),
@@ -101,6 +105,8 @@ impl App {
             show_timestamp: false,
             mod_toggle_timestamp: keys.toggle_timestamp.0,
             key_toggle_timestamp: keys.toggle_timestamp.1,
+            confirm_delete,
+            delete_confirm: None,
         }
     }
 
@@ -195,6 +201,7 @@ pub fn run(
     cwd: &str,
     limit: usize,
     keys: &ResolvedKeys,
+    confirm_delete: bool,
 ) -> io::Result<Action> {
     enable_raw_mode()?;
     execute!(io::stdout(), EnterAlternateScreen, SetCursorStyle::BlinkingBar)?;
@@ -205,7 +212,7 @@ pub fn run(
     let backend = ratatui::backend::CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = App::new(cwd.to_string(), limit, keys);
+    let mut app = App::new(cwd.to_string(), limit, keys, confirm_delete);
     app.load_entries(conn);
 
     let result = run_loop(&mut terminal, &mut app, conn);
@@ -261,6 +268,28 @@ fn run_loop(
                 // Any key closes help
                 _ if app.show_help => {
                     app.show_help = false;
+                }
+                // In delete confirmation mode: y=confirm, anything else=cancel
+                _ if app.delete_confirm.is_some() => {
+                    if let KeyCode::Char('y' | 'Y') = key.code {
+                        if let Some(idx) = app.delete_confirm.take() {
+                            if let Some(entry) = app.entries.get(idx) {
+                                match delete_command(conn, &entry.command, entry.cwd.as_deref()) {
+                                    Ok(n) => {
+                                        app.notification = Some(format!("已删除 {} 条记录", n));
+                                        app.notification_timer = 60;
+                                    }
+                                    Err(e) => {
+                                        app.notification = Some(format!("删除失败: {}", e));
+                                        app.notification_timer = 60;
+                                    }
+                                }
+                                app.load_entries(conn);
+                            }
+                        }
+                    } else {
+                        app.delete_confirm = None;
+                    }
                 }
                 KeyCode::Esc => {
                     if app.limit_mode {
@@ -374,6 +403,27 @@ fn run_loop(
                     if !app.jump_to_number() => {
                         app.select_execute();
                     }
+                KeyCode::Delete if !app.entries.is_empty() => {
+                    if app.confirm_delete {
+                        app.delete_confirm = Some(app.selected);
+                        let cmd_name = app.entries[app.selected].command.split('\n').next().unwrap_or("");
+                        app.notification = Some(format!("删除 '{}'? (y/N)", cmd_name));
+                        app.notification_timer = 0; // persist until action
+                    } else {
+                        let entry = &app.entries[app.selected];
+                        match delete_command(conn, &entry.command, entry.cwd.as_deref()) {
+                            Ok(n) => {
+                                app.notification = Some(format!("已删除 {} 条记录", n));
+                                app.notification_timer = 60;
+                            }
+                            Err(e) => {
+                                app.notification = Some(format!("删除失败: {}", e));
+                                app.notification_timer = 60;
+                            }
+                        }
+                        app.load_entries(conn);
+                    }
+                }
                 KeyCode::Backspace => {
                     if !app.number_buf.is_empty() {
                         app.number_buf.clear();
@@ -652,6 +702,7 @@ fn render_help(f: &mut Frame, area: Rect, app: &App) {
         ("> keyword".to_string(), "输入关键字过滤历史"),
         ("Enter".to_string(), "执行高亮命令"),
         ("Tab".to_string(), "选中命令到命令行"),
+        ("Delete".to_string(), "删除选中命令"),
         (mk(app.mod_toggle_sort, app.key_toggle_sort), "切换时间 / 频率排序"),
         (mk(app.mod_toggle_numbers, app.key_toggle_numbers), "进入数字跳转模式"),
         (mk(app.mod_toggle_help, app.key_toggle_help), "显示 / 隐藏此帮助"),

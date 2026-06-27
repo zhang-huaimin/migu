@@ -98,6 +98,21 @@ pub fn insert_imported_command(
     Ok(())
 }
 
+/// Delete all rows matching (command, cwd). If cwd is None, matches rows with NULL cwd.
+pub fn delete_command(conn: &Connection, command: &str, cwd: Option<&str>) -> rusqlite::Result<usize> {
+    let count = match cwd {
+        Some(c) => conn.execute(
+            "DELETE FROM commands WHERE command = ?1 AND cwd = ?2",
+            params![command, c],
+        )?,
+        None => conn.execute(
+            "DELETE FROM commands WHERE command = ?1 AND cwd IS NULL",
+            params![command],
+        )?,
+    };
+    Ok(count)
+}
+
 /// Check whether a shell's history has already been imported.
 pub fn is_imported(conn: &Connection, shell: &str) -> bool {
     conn.query_row(

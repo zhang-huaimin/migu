@@ -382,7 +382,13 @@ fn run_tui(cli: &Cli) {
         toggle_timestamp: config::resolve_binding(&ks.toggle_timestamp, leader),
     };
 
-    match tui::run(&conn, &cwd, cli.limit as usize, &keys) {
+    let confirm_delete = if std::env::var("MIGU_NO_CONFIRM").map(|v| v == "1").unwrap_or(false) {
+        false
+    } else {
+        cfg.confirm_delete
+    };
+
+    match tui::run(&conn, &cwd, cli.limit as usize, &keys, confirm_delete) {
         Ok(Action::Insert(cmd)) => {
             if std::env::var("MIGU_WIDGET").is_ok() {
                 // Widget mode: write to temp file
