@@ -32,8 +32,8 @@ fn main() {
         Some(Commands::Import { shell }) => {
             run_import(shell);
         }
-        Some(Commands::List { frequency, expand, limit }) => {
-            run_list(&cli, *frequency, *expand, limit.unwrap_or(cli.limit as usize));
+        Some(Commands::List { frequency, expand, limit, timestamp }) => {
+            run_list(&cli, *frequency, *expand, *timestamp, limit.unwrap_or(cli.limit as usize));
         }
         None => {
             // Default: launch TUI
@@ -207,7 +207,7 @@ fn detect_shell() -> String {
 }
 
 /// Handle the `migu list` subcommand: print history to stdout.
-fn run_list(cli: &Cli, by_freq: bool, expand: bool, limit: usize) {
+fn run_list(cli: &Cli, by_freq: bool, expand: bool, full_ts: bool, limit: usize) {
     let cfg = config::load();
     let path = cli
         .database
@@ -253,11 +253,13 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, limit: usize) {
 
     for (i, entry) in entries.iter().enumerate() {
         let num = (i + 1).to_string();
-        let time = entry
-            .created_at
-            .as_deref()
-            .map(relative_time_compact)
-            .unwrap_or_default();
+        let time = if full_ts {
+            entry.created_at.as_deref().unwrap_or("").to_string()
+        } else {
+            entry.created_at.as_deref()
+                .map(relative_time_compact)
+                .unwrap_or_default()
+        };
         let freq = format!("x{}", entry.freq);
         let cwd_display = match entry.cwd.as_deref() {
             Some(c) if c == current_cwd => String::from("."),

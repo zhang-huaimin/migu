@@ -69,6 +69,10 @@ pub enum Commands {
         #[arg(short = 'z')]
         expand: bool,
 
+        /// Show full ISO timestamp instead of relative time
+        #[arg(short = 't')]
+        timestamp: bool,
+
         /// Number of entries (overrides global --limit)
         #[arg(short = 'l')]
         limit: Option<usize>,
