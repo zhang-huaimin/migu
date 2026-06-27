@@ -258,11 +258,7 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, limit: usize) {
             .as_deref()
             .map(relative_time_compact)
             .unwrap_or_default();
-        let freq = if entry.freq > 1 {
-            format!("x{}", entry.freq)
-        } else {
-            String::new()
-        };
+        let freq = format!("x{}", entry.freq);
         let cwd_display = match entry.cwd.as_deref() {
             Some(c) if c == current_cwd => String::from("."),
             Some(c) => shorten_cwd(c),
