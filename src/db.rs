@@ -199,9 +199,9 @@ fn b64url_decode(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-/// Encode a list of row IDs into a fixed 32-char base64url string.
-/// Algorithm: sort → dedup → delta → zigzag → varint → pad/hash → base64url.
-/// Fits ≤23 varint bytes (∼15 typical IDs) losslessly; hashes if overflow.
+/// Encode a list of row IDs into a compact base64url string.
+/// Algorithm: sort → dedup → delta → zigzag → varint → base64url.
+/// Fully reversible; variable length.
 pub fn encode_ids(ids: &[i64]) -> String {
     let mut sorted = ids.to_vec();
     sorted.sort();
@@ -217,55 +217,17 @@ pub fn encode_ids(ids: &[i64]) -> String {
         varint_push(zigzag, &mut buf);
     }
 
-    let mut raw = [0u8; 24];
-    if buf.len() <= 23 {
-        raw[0] = 0x00;
-        raw[1..1 + buf.len()].copy_from_slice(&buf);
-    } else {
-        raw[0] = 0x01;
-        // Hash down: XOR chunks of buf into 23 bytes, then mix
-        let mut state = [0u8; 23];
-        for (i, &b) in buf.iter().enumerate() {
-            state[i % 23] ^= b;
-        }
-        for _ in 0..10 {
-            for i in 1..23 {
-                state[i] ^= state[i - 1].wrapping_mul(0x9d).rotate_left(5);
-            }
-            state[0] ^= state[22].wrapping_add(0xa5);
-            state.rotate_right(3);
-        }
-        raw[1..].copy_from_slice(&state);
-    }
-
-    b64url_encode(&raw)
+    b64url_encode(&buf)
 }
 
-/// Decode a 32-char base64url string back to row IDs. Returns None if
-/// the ID was hashed (version 0x01) or the string is invalid.
+/// Decode a base64url string back to a list of row IDs (reverse of encode_ids).
 pub fn decode_ids(s: &str) -> Option<Vec<i64>> {
     let data = b64url_decode(s)?;
-    if data.len() != 24 {
-        return None;
-    }
-    if data[0] == 0x01 {
-        return None; // hashed, unrecoverable
-    }
-    if data[0] != 0x00 {
-        return None;
-    }
-
-    // Varint-decode from data[1..], stopping at zero padding
-    let payload = &data[1..];
     let mut ids = Vec::new();
     let mut pos = 0;
     let mut prev: i64 = 0;
-    while pos < 23 {
-        // Stop if all remaining bytes are zero (padding)
-        if payload[pos..].iter().all(|&b| b == 0) {
-            break;
-        }
-        let zigzag = varint_pop(payload, &mut pos)? as i64;
+    while pos < data.len() {
+        let zigzag = varint_pop(&data, &mut pos)? as i64;
         let delta = (zigzag >> 1) ^ (-(zigzag & 1));
         let id = prev + delta;
         prev = id;
