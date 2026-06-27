@@ -264,7 +264,7 @@ fn run_list(cli: &Cli, by_freq: bool, expand: bool, limit: usize) {
             String::new()
         };
         let cwd_display = match entry.cwd.as_deref() {
-            Some(c) if c == current_cwd => String::from("-"),
+            Some(c) if c == current_cwd => String::from("."),
             Some(c) => shorten_cwd(c),
             None => String::new(),
         };
